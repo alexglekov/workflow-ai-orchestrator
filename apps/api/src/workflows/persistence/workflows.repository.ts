@@ -15,6 +15,7 @@ const toStepCreates = (steps: WorkflowStepInput[]) =>
     action: step.action,
     params: (step.params ?? {}) as Prisma.InputJsonValue,
     connectionId: step.connectionId || null,
+    iterate: Boolean(step.iterate),
   }));
 
 @Injectable()

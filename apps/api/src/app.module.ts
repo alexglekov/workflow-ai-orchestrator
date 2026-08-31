@@ -7,6 +7,7 @@ import { ConnectionsModule } from './connections/connections.module';
 import { ConnectorsModule } from './connectors/connectors.module';
 import { HealthController } from './health/health.controller';
 import { RunsModule } from './runs/runs.module';
+import { TriggersModule } from './triggers/triggers.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 
 @Module({
@@ -25,6 +26,7 @@ import { WorkflowsModule } from './workflows/workflows.module';
     WorkflowsModule,
     RunsModule,
     AgentsModule,
+    TriggersModule,
   ],
   controllers: [HealthController],
 })

@@ -24,6 +24,7 @@ model Workflow {
   prompt    String         @default("")
   steps     WorkflowStep[]
   runs      Run[]
+  triggers  Trigger[]
   createdAt DateTime       @default(now())
   updatedAt DateTime       @updatedAt
 }
@@ -38,8 +39,25 @@ model WorkflowStep {
   action       String
   params       Json     @default("{}")
   connectionId String?
+  iterate      Boolean  @default(false)
 
   @@index([workflowId, order])
+}
+
+model Trigger {
+  id          String    @id @default(uuid())
+  workflowId  String
+  workflow    Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  type        String
+  enabled     Boolean   @default(true)
+  config      Json      @default("{}")
+  token       String?   @unique
+  lastFiredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workflowId])
+  @@index([enabled, type])
 }
 
 model Run {
@@ -47,6 +65,9 @@ model Run {
   workflowId String
   workflow   Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
   status     String    @default("pending")
+  source     String    @default("manual")
+  triggerId  String?
+  input      Json?
   startedAt  DateTime?
   finishedAt DateTime?
   steps      RunStep[]

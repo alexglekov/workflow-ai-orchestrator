@@ -1,5 +1,5 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
-import { fallbackParse, parsePromptToSteps } from '@ai-worker/workflow';
+import { parsePromptToSteps, STARTER_PROMPT, starterSteps } from '@ai-worker/workflow';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
 import {
   CreateWorkflowDto,
@@ -8,8 +8,7 @@ import {
 } from './dto';
 import { WorkflowsRepository } from './persistence/workflows.repository';
 
-const DEMO_PROMPT =
-  'Проверять новые письма с заявками. Создать запись в 1С. Добавить строку в Excel. Отправить уведомление в Telegram.';
+const DEMO_PROMPT = STARTER_PROMPT;
 
 @Injectable()
 export class WorkflowsService {
@@ -70,8 +69,8 @@ export class WorkflowsService {
 
   createDemo = () =>
     this.workflows.create({
-      name: 'Заявки из почты → 1С / Excel / Telegram',
+      name: 'Письма → Excel → Telegram',
       prompt: DEMO_PROMPT,
-      steps: fallbackParse(DEMO_PROMPT),
+      steps: starterSteps(),
     });
 }

@@ -103,7 +103,11 @@ export const oneCConnector: Connector = {
         return { ok: false, error: `Неизвестное действие: ${input.action}` };
       }
 
-      const ctx = mergeContext(input.params, input.previousResult);
+      const ctx = mergeContext(
+        input.params,
+        input.previousResult,
+        input.context,
+      );
       const resource = String(
         ctx['resource'] || input.credentials['resource'] || '',
       );

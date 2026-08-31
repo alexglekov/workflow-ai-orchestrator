@@ -6,6 +6,7 @@ export {
   fetchWorkflow,
   updateWorkflow,
   parseWorkflow,
+  createDemoWorkflow,
   deleteWorkflow,
   clearWorkflows,
 } from './api/workflows';

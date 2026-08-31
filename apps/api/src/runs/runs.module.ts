@@ -10,5 +10,6 @@ import { RunsService } from './runs.service';
   imports: [ConnectorsModule, ConnectionsModule, WorkflowsModule],
   controllers: [RunsController],
   providers: [RunsRepository, RunsService],
+  exports: [RunsService],
 })
 export class RunsModule {}

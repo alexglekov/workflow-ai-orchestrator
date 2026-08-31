@@ -17,6 +17,14 @@ import {
 } from '~/entities/connector';
 import { startRun } from '~/entities/run';
 import {
+  createTrigger,
+  deleteTrigger,
+  fetchTriggers,
+  updateTrigger,
+  type TriggerType,
+  type WorkflowTrigger,
+} from '~/entities/trigger';
+import {
   fetchWorkflow,
   updateWorkflow,
   workflowAtom,
@@ -26,7 +34,10 @@ import {
   AskThread,
   NodePicker,
   PromptForm,
+  RunInputDialog,
   StepsEditor,
+  TriggerPanel,
+  TriggerPicker,
 } from '~/features/compose-workflow';
 import { errorAtom, loadingAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
@@ -43,6 +54,12 @@ export const WorkflowEditorPage = () => {
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [triggerPickerOpen, setTriggerPickerOpen] = useState(false);
+  const [triggerPickerType, setTriggerPickerType] =
+    useState<TriggerType>('schedule');
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [runInput, setRunInput] = useState('{}');
+  const [triggers, setTriggers] = useState<WorkflowTrigger[]>([]);
   const [mode, setMode] = useState<ComposerMode>('build');
   const [askDraft, setAskDraft] = useState('');
   const [askMessages, setAskMessages] = useState<AgentMessage[]>([]);
@@ -96,6 +113,7 @@ export const WorkflowEditorPage = () => {
         setProviderId('gemini');
         setPrompt(nextWorkflow.prompt);
         setName(nextWorkflow.name);
+        setTriggers(await fetchTriggers(id).catch(() => []));
         setMode('build');
         setAskDraft('');
         setAskMessages([]);
@@ -147,7 +165,8 @@ export const WorkflowEditorPage = () => {
           connectorId: step.connectorId,
           action: step.action,
           params: step.params,
-          connectionId: step.connectionId ?? undefined,
+                          connectionId: step.connectionId ?? undefined,
+                          iterate: Boolean(step.iterate),
         })),
       });
 
@@ -360,10 +379,87 @@ export const WorkflowEditorPage = () => {
           action: action?.id || '',
           params: {},
           connectionId: null,
+          iterate: false,
         },
       ],
       true,
     );
+  };
+
+  const openTriggerPicker = (type: TriggerType = 'schedule') => {
+    setTriggerPickerType(type);
+    setTriggerPickerOpen(true);
+  };
+
+  const addTrigger = async (
+    type: TriggerType,
+    everyMinutes?: number,
+    at?: string,
+  ) => {
+    if (!id) {
+      return;
+    }
+
+    setTriggerPickerOpen(false);
+
+    try {
+      const created = await createTrigger(id, { type, everyMinutes, at });
+
+      setTriggers((current) => [...current, created]);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить триггер');
+    }
+  };
+
+  const changeTriggerTiming = async (
+    triggerId: string,
+    everyMinutes: number,
+    at: string,
+  ) => {
+    try {
+      const next = await updateTrigger(triggerId, {
+        everyMinutes,
+        at: at || null,
+      });
+
+      setTriggers((current) =>
+        current.map((item) =>
+          item.id === triggerId
+            ? { ...item, ...next, webhookUrl: item.webhookUrl }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Не удалось обновить расписание',
+      );
+    }
+  };
+
+  const toggleTrigger = async (triggerId: string, enabled: boolean) => {
+    try {
+      const next = await updateTrigger(triggerId, { enabled });
+
+      setTriggers((current) =>
+        current.map((item) =>
+          item.id === triggerId
+            ? { ...item, ...next, webhookUrl: item.webhookUrl }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обновить триггер');
+    }
+  };
+
+  const removeTrigger = async (triggerId: string) => {
+    try {
+      await deleteTrigger(triggerId);
+      setTriggers((current) => current.filter((item) => item.id !== triggerId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить триггер');
+    }
   };
 
   const run = async () => {
@@ -375,7 +471,15 @@ export const WorkflowEditorPage = () => {
 
     try {
       await persist(workflowRef.current?.steps ?? workflow.steps);
-      const created = await startRun(id);
+      let input: Record<string, unknown> = {};
+
+      try {
+        input = JSON.parse(runInput || '{}') as Record<string, unknown>;
+      } catch {
+        throw new Error('Input должен быть JSON-объектом');
+      }
+
+      const created = await startRun(id, input);
 
       navigate(`/runs/${created.id}`);
     } catch (err) {
@@ -393,9 +497,6 @@ export const WorkflowEditorPage = () => {
   const empty = workflow.steps.length === 0;
   const buildFollowUp = buildMessages.length > 0;
   const composerBusy = mode === 'ask' ? asking : planning;
-  const chatting =
-    composerBusy ||
-    (mode === 'ask' ? askMessages : buildMessages).length > 0;
   const composerValue =
     mode === 'ask' ? askDraft : buildFollowUp ? planDraft : prompt;
   const changeComposer = (value: string) => {
@@ -413,22 +514,12 @@ export const WorkflowEditorPage = () => {
   };
 
   return (
-    <div
-      className={`canvas-page${empty ? '' : ' with-flow'}${chatting ? ' has-chat' : ''}`}
-    >
-      <button
-        type="button"
-        className="fab"
-        onClick={() => setPickerOpen(true)}
-        aria-label="Добавить коннектор"
-      >
-        <Icon name="plus" size={22} />
-      </button>
-      <div className="canvas-chrome">
+    <div className={`canvas-page editor-page${empty ? ' is-empty' : ''}`}>
+      <header className="canvas-chrome">
         <Link
           to="/workflows"
           className="icon-btn"
-          aria-label="На главную"
+          aria-label="К списку"
           onClick={() =>
             void persist(
               workflowRef.current?.steps ?? workflow.steps,
@@ -453,81 +544,135 @@ export const WorkflowEditorPage = () => {
         <div className="chrome-actions">
           <button
             type="button"
-            className="play-btn"
-            onClick={() => void run()}
-            disabled={loading || empty}
-            aria-label="Запустить"
+            className="icon-btn"
+            onClick={() => setPickerOpen(true)}
+            aria-label="Добавить шаг"
           >
-            <Icon name="play" size={14} />
+            <Icon name="plus" size={16} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => openTriggerPicker('schedule')}
+            aria-label="Добавить триггер"
+          >
+            <Icon name="clock" size={16} />
+          </button>
+          <button
+            type="button"
+            className="play-btn labeled"
+            onClick={() => setRunDialogOpen(true)}
+            disabled={loading || empty}
+          >
+            <Icon name="play" size={13} />
+            Run
           </button>
         </div>
-      </div>
+      </header>
       {error ? <Banner>{error}</Banner> : null}
-      <div className="canvas-workspace">
-        <section className="canvas-chat">
-          <AskThread
-            messages={mode === 'ask' ? askMessages : buildMessages}
-            loading={mode === 'ask' ? asking : planning}
-          />
-          <PromptForm
-            mode={mode}
-            prompt={composerValue}
-            loading={composerBusy}
-            providers={providers}
-            providerId={providerId}
-            onModeChange={setMode}
-            onPromptChange={changeComposer}
-            onProviderChange={setProviderId}
-            onSubmit={() => void (mode === 'ask' ? ask() : plan())}
-            placeholder={
-              mode === 'ask'
-                ? undefined
-                : buildFollowUp
-                  ? 'Ответьте на уточняющие вопросы агента'
-                  : undefined
-            }
-          />
-          {empty && mode === 'build' && !buildFollowUp ? (
-            <>
-              <div className="or-row">OR</div>
-              <div className="start-tiles">
-                <button
-                  type="button"
-                  className="start-tile"
-                  onClick={() => setPickerOpen(true)}
-                >
-                  <span className="tile-icon green">
-                    <Icon name="target" size={18} />
-                  </span>
-                  <strong>Начать с триггера</strong>
-                </button>
-                <Link to="/connectors" className="start-tile">
-                  <span className="tile-icon blue">
-                    <Icon name="blocks" size={16} />
-                  </span>
-                  <strong>Начать с коннектора</strong>
-                </Link>
-              </div>
-            </>
-          ) : null}
-        </section>
-        {empty ? null : (
-          <section className="canvas-flow">
-            <StepsEditor
-              steps={workflow.steps}
-              catalog={catalog}
-              connections={connections}
-              onChange={updateStep}
-              onRemove={removeStep}
+      <div className="editor-body">
+        <TriggerPanel
+          triggers={triggers}
+          onOpenPicker={openTriggerPicker}
+          onToggle={(triggerId, enabled) =>
+            void toggleTrigger(triggerId, enabled)
+          }
+          onRemove={(triggerId) => void removeTrigger(triggerId)}
+          onTiming={(triggerId, everyMinutes, at) =>
+            void changeTriggerTiming(triggerId, everyMinutes, at)
+          }
+        />
+        <div className={`editor-main${empty ? ' is-empty' : ''}`}>
+          {empty ? (
+            <div className="editor-hero">
+              {mode === 'build' && !buildFollowUp ? (
+                <div className="start-tiles">
+                  <button
+                    type="button"
+                    className="start-tile"
+                    onClick={() => openTriggerPicker('schedule')}
+                  >
+                    <span className="tile-icon green">
+                      <Icon name="target" size={18} />
+                    </span>
+                    <strong>Начать с триггера</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="start-tile"
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    <span className="tile-icon blue">
+                      <Icon name="blocks" size={16} />
+                    </span>
+                    <strong>Добавить шаг</strong>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <section className="canvas-flow">
+              <StepsEditor
+                steps={workflow.steps}
+                catalog={catalog}
+                connections={connections}
+                onChange={updateStep}
+                onRemove={removeStep}
+              />
+            </section>
+          )}
+          <div className="composer-dock">
+            <AskThread
+              messages={mode === 'ask' ? askMessages : buildMessages}
+              loading={mode === 'ask' ? asking : planning}
             />
-          </section>
-        )}
+            <PromptForm
+              mode={mode}
+              prompt={composerValue}
+              loading={composerBusy}
+              providers={providers}
+              providerId={providerId}
+              onModeChange={setMode}
+              onPromptChange={changeComposer}
+              onProviderChange={setProviderId}
+              onSubmit={() => void (mode === 'ask' ? ask() : plan())}
+              placeholder={
+                mode === 'ask'
+                  ? undefined
+                  : buildFollowUp
+                    ? 'Ответьте на уточняющие вопросы агента'
+                    : undefined
+              }
+            />
+          </div>
+        </div>
       </div>
       {pickerOpen ? (
         <NodePicker
           catalog={catalog}
           onClose={() => setPickerOpen(false)}
           onPick={(connector) => void addNode(connector)}
+        />
+      ) : null}
+      {triggerPickerOpen ? (
+        <TriggerPicker
+          key={triggerPickerType}
+          initialType={triggerPickerType}
+          onClose={() => setTriggerPickerOpen(false)}
+          onPick={(type, everyMinutes, at) =>
+            void addTrigger(type, everyMinutes, at)
+          }
+        />
+      ) : null}
+      {runDialogOpen ? (
+        <RunInputDialog
+          value={runInput}
+          onChange={setRunInput}
+          onCancel={() => setRunDialogOpen(false)}
+          onRun={() => {
+            setRunDialogOpen(false);
+            void run();
+          }}
         />
       ) : null}
     </div>

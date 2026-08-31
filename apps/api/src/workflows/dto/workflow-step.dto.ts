@@ -1,4 +1,5 @@
-import { IsObject, IsOptional, IsString } from 'class-validator';
+import { Transform } from 'class-transformer';
+import { IsBoolean, IsObject, IsOptional, IsString } from 'class-validator';
 
 export class WorkflowStepDto {
   @IsOptional()
@@ -21,4 +22,9 @@ export class WorkflowStepDto {
   @IsOptional()
   @IsString()
   connectionId?: string;
+
+  @IsOptional()
+  @IsBoolean()
+  @Transform(({ value }) => value === true || value === 'true')
+  iterate?: boolean;
 }

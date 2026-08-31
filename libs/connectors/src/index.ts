@@ -5,3 +5,4 @@ export { mailConnector } from './lib/mail/mail.connector';
 export { telegramConnector } from './lib/telegram/telegram.connector';
 export { oneCConnector } from './lib/onec/onec.connector';
 export { excelConnector } from './lib/excel/excel.connector';
+export { webConnector } from './lib/web/web.connector';

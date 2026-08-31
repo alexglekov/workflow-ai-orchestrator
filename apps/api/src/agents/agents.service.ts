@@ -128,11 +128,12 @@ export class AgentsService {
     const connectors = this.connectors.listConnectors().map((connector) => ({
       id: connector.id,
       name: connector.name,
+      description: connector.description,
       actions: connector.actions.map((action) => ({
         id: action.id,
         name: action.name,
         description: action.description,
-        params: Object.keys(action.paramsSchema ?? {}),
+        params: action.paramsSchema,
       })),
     }));
     const connections = (await this.connections.list()).map((item) => ({

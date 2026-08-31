@@ -91,9 +91,9 @@ export const WorkflowsPage = () => {
   };
 
   return (
-    <div className="canvas-page">
-      <div className="page workflows-page">
-        <h1 className="workflows-title">Workflows</h1>
+    <div className="canvas-page list-page">
+      <div className="list-shell">
+        <h1 className="list-title">Workflows</h1>
         {error ? <Banner>{error}</Banner> : null}
         <section className="workflow-create-section">
           <CreateWorkflowButton />

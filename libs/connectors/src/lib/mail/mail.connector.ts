@@ -204,10 +204,10 @@ export const mailConnector: Connector = {
   execute: async (
     input: ConnectorExecuteInput,
   ): Promise<ConnectorExecuteResult> => {
-    const params = interpolate(input.params, input.previousResult) as Record<
-      string,
-      unknown
-    >;
+    const params = interpolate(
+      input.params,
+      input.context ?? input.previousResult,
+    ) as Record<string, unknown>;
 
     try {
       if (input.action === 'fetch_new') {

@@ -200,7 +200,11 @@ export const excelConnector: Connector = {
       const { provider, token, folder, fileUrl } = resolveCloud(
         input.credentials,
       );
-      const ctx = mergeContext(input.params, input.previousResult);
+      const ctx = mergeContext(
+        input.params,
+        input.previousResult,
+        input.context,
+      );
       const sheetName = String(
         ctx['sheet'] || input.credentials['sheet'] || 'Заявки',
       );
@@ -237,10 +241,10 @@ export const excelConnector: Connector = {
           }
 
           const row = [
-            firstNonEmpty(ctx['name']),
+            firstNonEmpty(ctx['name'], ctx['from']),
             firstNonEmpty(ctx['phone']),
-            firstNonEmpty(ctx['company']),
-            ctx['amount'] ?? '',
+            firstNonEmpty(ctx['company'], ctx['subject']),
+            ctx['amount'] ?? ctx['text'] ?? '',
             new Date().toISOString(),
           ];
 

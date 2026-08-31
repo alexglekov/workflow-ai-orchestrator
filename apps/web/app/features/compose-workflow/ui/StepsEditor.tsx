@@ -71,6 +71,7 @@ export const StepsEditor = ({
                 {needsAccount ? (
                   <span className="chip warn">Нет аккаунта</span>
                 ) : null}
+                {step.iterate ? <span className="chip mcp">for each</span> : null}
                 <button
                   type="button"
                   className="node-delete"
@@ -168,6 +169,20 @@ export const StepsEditor = ({
                       Нет подключённого аккаунта для этого сервиса.
                     </p>
                   ) : null}
+                  <label className="iterate-row">
+                    <input
+                      type="checkbox"
+                      checked={Boolean(step.iterate)}
+                      onChange={(event) =>
+                        onChange(index, { iterate: event.target.checked })
+                      }
+                    />
+                    Для каждого элемента списка (письмо, строка)
+                  </label>
+                  <p className="muted">
+                    Плейсхолдеры: {'{{previous}}'}, {'{{item.subject}}'},{' '}
+                    {'{{input.field}}'}, {'{{steps.1.field}}'}
+                  </p>
                   <label>
                     Параметры (JSON)
                     <textarea

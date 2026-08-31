@@ -6,6 +6,7 @@ export interface WorkflowStep {
   action: string;
   params: Record<string, unknown>;
   connectionId: string | null;
+  iterate: boolean;
 }
 
 export interface Workflow {

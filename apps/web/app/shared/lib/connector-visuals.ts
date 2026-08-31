@@ -4,6 +4,7 @@ export const connectorVisual = (id: string) => {
     telegram: { letter: 'Tg', bg: '#e3f2fd', color: '#1565c0' },
     onec: { letter: '1C', bg: '#fff3e0', color: '#ef6c00' },
     excel: { letter: 'Xl', bg: '#e8f5e9', color: '#2e7d32' },
+    web: { letter: 'W', bg: '#ede7f6', color: '#5e35b1' },
   };
 
   return map[id] ?? { letter: id.slice(0, 2).toUpperCase(), bg: '#f4f4f5', color: '#3f3f46' };

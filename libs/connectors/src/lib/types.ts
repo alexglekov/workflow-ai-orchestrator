@@ -25,11 +25,14 @@ export interface ConnectorAction {
   paramsSchema: Record<string, ConnectorActionParam>;
 }
 
+import type { TemplateContext } from './interpolate';
+
 export interface ConnectorExecuteInput {
   action: string;
   params: Record<string, unknown>;
   previousResult: unknown;
   credentials: Record<string, string>;
+  context?: TemplateContext;
 }
 
 export interface ConnectorExecuteResult {

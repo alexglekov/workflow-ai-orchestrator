@@ -6,6 +6,8 @@ import { ConnectorRegistryService } from '../connectors/connector-registry.servi
 import { WorkflowsService } from '../workflows/workflows.service';
 import { RunsRepository } from './persistence/runs.repository';
 
+export type RunSource = 'manual' | 'webhook' | 'schedule' | 'mail' | 'retry';
+
 @Injectable()
 export class RunsService {
   private readonly logger = new Logger(RunsService.name);
@@ -17,7 +19,14 @@ export class RunsService {
     private readonly connections: ConnectionsService,
   ) {}
 
-  start = async (workflowId: string) => {
+  start = async (
+    workflowId: string,
+    options?: {
+      input?: unknown;
+      source?: RunSource;
+      triggerId?: string;
+    },
+  ) => {
     const workflow = await this.workflows.get(workflowId);
 
     if (workflow.steps.length === 0) {
@@ -26,6 +35,9 @@ export class RunsService {
 
     const run = await this.runs.create({
       workflowId,
+      source: options?.source ?? 'manual',
+      triggerId: options?.triggerId,
+      input: options?.input ?? null,
       steps: workflow.steps.map((step) => ({
         workflowStepId: step.id,
         order: step.order,
@@ -35,9 +47,18 @@ export class RunsService {
       })),
     });
 
-    void this.execute(run.id, workflow);
+    void this.execute(run.id, workflow, options?.input ?? null);
 
     return this.get(run.id);
+  };
+
+  retry = async (id: string) => {
+    const run = await this.get(id);
+
+    return this.start(run.workflowId, {
+      input: run.input,
+      source: 'retry',
+    });
   };
 
   get = async (id: string) => {
@@ -50,9 +71,12 @@ export class RunsService {
     return run;
   };
 
+  hasActive = (workflowId: string) => this.runs.hasActive(workflowId);
+
   private execute = async (
     runId: string,
     workflow: Awaited<ReturnType<WorkflowsService['get']>>,
+    initialInput: unknown,
   ) => {
     await this.runs.update(runId, {
       status: 'running',
@@ -71,7 +95,9 @@ export class RunsService {
           action: step.action,
           params: (step.params as Record<string, unknown>) ?? {},
           connectionId: step.connectionId,
+          iterate: step.iterate,
         })),
+        initialInput,
         getConnector: (id) => this.connectors.get(id),
         getCredentials: async (connectionId, connectorId) => {
           const found = await this.connections.resolveCredentials(

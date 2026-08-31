@@ -12,6 +12,9 @@ export class RunsRepository {
 
   create = (data: {
     workflowId: string;
+    source?: string;
+    triggerId?: string;
+    input?: unknown;
     steps: Array<{
       workflowStepId: string;
       order: number;
@@ -24,6 +27,12 @@ export class RunsRepository {
       data: {
         workflowId: data.workflowId,
         status: 'pending',
+        source: data.source ?? 'manual',
+        triggerId: data.triggerId,
+        input:
+          data.input === undefined || data.input === null
+            ? Prisma.JsonNull
+            : (data.input as Prisma.InputJsonValue),
         steps: {
           create: data.steps.map((step) => ({
             ...step,
@@ -39,6 +48,18 @@ export class RunsRepository {
       where: { id },
       include: stepsInclude,
     });
+
+  hasActive = async (workflowId: string) => {
+    const found = await this.prisma.run.findFirst({
+      where: {
+        workflowId,
+        status: { in: ['pending', 'running'] },
+      },
+      select: { id: true },
+    });
+
+    return Boolean(found);
+  };
 
   update = (
     id: string,

@@ -1,7 +1,7 @@
-import { useEffect } from 'react';
-import { Link, useParams } from 'react-router';
+import { useEffect, useState } from 'react';
+import { Link, useNavigate, useParams } from 'react-router';
 import { useAtom } from 'jotai';
-import { fetchRun, runAtom } from '~/entities/run';
+import { fetchRun, retryRun, runAtom } from '~/entities/run';
 import { errorAtom } from '~/shared/model/ui';
 import { connectorVisual } from '~/shared/lib/connector-visuals';
 import { runStatusLabel, stepStatusLabel } from '~/shared/lib/status';
@@ -11,8 +11,10 @@ import { StatusBadge } from '~/shared/ui/StatusBadge';
 
 export const RunPage = () => {
   const { id } = useParams();
+  const navigate = useNavigate();
   const [run, setRun] = useAtom(runAtom);
   const [error, setError] = useAtom(errorAtom);
+  const [retrying, setRetrying] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -65,8 +67,8 @@ export const RunPage = () => {
   }
 
   return (
-    <div className="canvas-page">
-      <div className="canvas-chrome">
+    <div className="canvas-page run-page">
+      <header className="canvas-chrome">
         <Link
           to={`/workflows/${run.workflowId}`}
           className="icon-btn"
@@ -75,9 +77,46 @@ export const RunPage = () => {
           <Icon name="home" size={16} />
         </Link>
         <h1>Run</h1>
-        <StatusBadge status={run.status} label={runStatusLabel(run.status)} />
-      </div>
+        <div className="chrome-actions">
+          <StatusBadge status={run.status} label={runStatusLabel(run.status)} />
+          {run.status === 'error' ? (
+            <button
+              type="button"
+              className="icon-btn"
+              disabled={retrying}
+              aria-label="Повторить"
+              onClick={() => {
+                if (!id || retrying) {
+                  return;
+                }
+
+                setRetrying(true);
+                void retryRun(id)
+                  .then((created) => navigate(`/runs/${created.id}`))
+                  .catch((err) => {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : 'Не удалось повторить',
+                    );
+                    setRetrying(false);
+                  });
+              }}
+            >
+              <Icon name="refresh" size={16} />
+            </button>
+          ) : null}
+        </div>
+      </header>
       {error ? <Banner>{error}</Banner> : null}
+      {run.source || run.input != null ? (
+        <div className="run-meta-card">
+          {run.source ? <span>Источник: {run.source}</span> : null}
+          {run.input != null ? (
+            <code>{JSON.stringify(run.input)}</code>
+          ) : null}
+        </div>
+      ) : null}
       <div className="canvas-board">
         <div className="flow">
           {run.steps.map((step, index) => {

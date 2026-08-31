@@ -130,6 +130,13 @@ export const ConnectorCard = ({
               </span>
             ))}
           </div>
+          {connector.id === 'web' ? (
+            <p className="muted">
+              Подключать аккаунт не обязательно. Поиск идёт через DuckDuckGo;
+              Brave API — если HTML-поиск режут. Сайт логина этим шагом не
+              открыть.
+            </p>
+          ) : null}
           {connections.length ? (
             <ul className="connection-list">
               {connections.map((item) => (
@@ -203,10 +210,7 @@ export const ConnectorCard = ({
               />
             </label>
             {connector.credentialFields.length === 0 ? (
-              <p className="muted">
-                Этому коннектору не нужны учётные данные (используется
-                OPENAI_API_KEY).
-              </p>
+              <p className="muted">Этому коннектору не нужны учётные данные.</p>
             ) : (
               connector.credentialFields.map((field) => (
                 <label key={field.key}>

@@ -1,4 +1,4 @@
-import { fallbackParse } from '@ai-worker/workflow';
+import { planFromCatalog } from '@ai-worker/workflow';
 import type {
   AgentAskInput,
   AgentPlanInput,
@@ -71,12 +71,30 @@ export class LocalAgent implements AgentProvider {
       };
     }
 
-    const steps = fallbackParse(text).map((step) => ({
-      title: step.title,
-      connectorId: step.connectorId,
-      action: step.action,
-      params: step.params ?? {},
-    }));
+    const steps = planFromCatalog(text, input.context.connectors).map(
+      (step) => ({
+        title: step.title,
+        connectorId: step.connectorId,
+        action: step.action,
+        params: step.params ?? {},
+        iterate: step.iterate,
+      }),
+    );
+
+    if (steps.length === 0) {
+      return {
+        kind: 'questions',
+        providerId: this.id,
+        message:
+          'Не сопоставил задачу с действиями из каталога коннекторов.',
+        questions: [
+          'Какие действия из доступных коннекторов выполнить?',
+          'Откуда взять данные и куда их отправить?',
+        ],
+        connectors: [],
+        steps: [],
+      };
+    }
 
     return {
       kind: 'workflow',

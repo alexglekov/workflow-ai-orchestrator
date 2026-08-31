@@ -70,10 +70,10 @@ export const telegramConnector: Connector = {
         return { ok: false, error: `Неизвестное действие: ${input.action}` };
       }
 
-      const params = interpolate(input.params, input.previousResult) as Record<
-        string,
-        unknown
-      >;
+      const params = interpolate(
+        input.params,
+        input.context ?? input.previousResult,
+      ) as Record<string, unknown>;
       const token = input.credentials['botToken'];
       const chatId = String(
         params['chatId'] || input.credentials['chatId'] || '',

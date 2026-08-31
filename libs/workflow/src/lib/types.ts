@@ -1,8 +1,11 @@
+import type { TemplateContext } from '@ai-worker/connectors';
+
 export interface ParsedStep {
   title: string;
   connectorId: string;
   action: string;
   params: Record<string, unknown>;
+  iterate?: boolean;
 }
 
 export interface EngineStep {
@@ -13,6 +16,7 @@ export interface EngineStep {
   action: string;
   params: Record<string, unknown>;
   connectionId?: string | null;
+  iterate?: boolean;
 }
 
 export type StepStatus = 'pending' | 'running' | 'success' | 'error';
@@ -36,6 +40,7 @@ export interface RunWorkflowOptions {
           params: Record<string, unknown>;
           previousResult: unknown;
           credentials: Record<string, string>;
+          context?: TemplateContext;
         }) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
       }
     | undefined;
