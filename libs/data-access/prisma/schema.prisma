@@ -1,0 +1,73 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Connection {
+  id             String   @id @default(uuid())
+  connectorId    String
+  name           String
+  credentialsEnc String
+  status         String   @default("disconnected")
+  lastError      String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+}
+
+model Workflow {
+  id        String         @id @default(uuid())
+  name      String
+  prompt    String         @default("")
+  steps     WorkflowStep[]
+  runs      Run[]
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+}
+
+model WorkflowStep {
+  id           String   @id @default(uuid())
+  workflowId   String
+  workflow     Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  order        Int
+  title        String
+  connectorId  String
+  action       String
+  params       Json     @default("{}")
+  connectionId String?
+
+  @@index([workflowId, order])
+}
+
+model Run {
+  id         String    @id @default(uuid())
+  workflowId String
+  workflow   Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status     String    @default("pending")
+  startedAt  DateTime?
+  finishedAt DateTime?
+  steps      RunStep[]
+  createdAt  DateTime  @default(now())
+}
+
+model RunStep {
+  id             String    @id @default(uuid())
+  runId          String
+  run            Run       @relation(fields: [runId], references: [id], onDelete: Cascade)
+  workflowStepId String?
+  order          Int
+  title          String
+  connectorId    String
+  action         String
+  status         String    @default("pending")
+  input          Json?
+  output         Json?
+  error          String?
+  startedAt      DateTime?
+  finishedAt     DateTime?
+
+  @@index([runId, order])
+}

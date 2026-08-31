@@ -1,0 +1,26 @@
+{
+  "compileOnSave": false,
+  "compilerOptions": {
+    "rootDir": ".",
+    "sourceMap": true,
+    "declaration": false,
+    "moduleResolution": "bundler",
+    "emitDecoratorMetadata": true,
+    "experimentalDecorators": true,
+    "importHelpers": true,
+    "target": "es2015",
+    "module": "esnext",
+    "lib": ["es2020", "dom"],
+    "skipLibCheck": true,
+    "skipDefaultLibCheck": true,
+    "strict": false,
+    "paths": {
+      "~/*": ["./apps/web/app/*"],
+      "@ai-worker/connectors": ["./libs/connectors/src/index.ts"],
+      "@ai-worker/workflow": ["./libs/workflow/src/index.ts"],
+      "@ai-worker/data-access": ["./libs/data-access/src/index.ts"],
+      "@ai-worker/agents": ["./libs/agents/src/index.ts"]
+    }
+  },
+  "exclude": ["node_modules", "tmp"]
+}
