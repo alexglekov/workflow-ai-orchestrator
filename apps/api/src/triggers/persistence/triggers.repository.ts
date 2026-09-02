@@ -3,7 +3,7 @@ import { Injectable } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { PrismaService } from '@ai-worker/data-access';
 
-export type TriggerType = 'schedule' | 'webhook' | 'mail';
+export type TriggerType = 'schedule' | 'webhook' | 'mail' | 'telegram';
 
 @Injectable()
 export class TriggersRepository {
@@ -25,7 +25,7 @@ export class TriggersRepository {
     this.prisma.trigger.findMany({
       where: {
         enabled: true,
-        type: { in: ['schedule', 'mail'] },
+        type: { in: ['schedule', 'mail', 'telegram'] },
       },
     });
 
@@ -41,7 +41,10 @@ export class TriggersRepository {
         type: data.type,
         enabled: data.enabled ?? true,
         config: (data.config ?? {}) as Prisma.InputJsonValue,
-        token: data.type === 'webhook' ? randomBytes(24).toString('hex') : null,
+        token:
+          data.type === 'webhook' || data.type === 'telegram'
+            ? randomBytes(24).toString('hex')
+            : null,
       },
     });
 
@@ -68,6 +71,24 @@ export class TriggersRepository {
     this.prisma.trigger.update({
       where: { id },
       data: { lastFiredAt: at },
+    });
+
+  claim = async (id: string, expectedLastFiredAt: Date | null, at: Date) => {
+    const result = await this.prisma.trigger.updateMany({
+      where: {
+        id,
+        lastFiredAt: expectedLastFiredAt,
+      },
+      data: { lastFiredAt: at },
+    });
+
+    return result.count === 1;
+  };
+
+  restoreFired = (id: string, lastFiredAt: Date | null) =>
+    this.prisma.trigger.update({
+      where: { id },
+      data: { lastFiredAt },
     });
 
   delete = (id: string) => this.prisma.trigger.delete({ where: { id } });

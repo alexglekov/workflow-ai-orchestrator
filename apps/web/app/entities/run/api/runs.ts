@@ -13,4 +13,7 @@ export const startRun = (
 export const retryRun = (id: string) =>
   http<Run>(`/runs/${id}/retry`, { method: 'POST' });
 
+export const cancelRun = (id: string) =>
+  http<Run>(`/runs/${id}/cancel`, { method: 'POST' });
+
 export const fetchRun = (id: string) => http<Run>(`/runs/${id}`);

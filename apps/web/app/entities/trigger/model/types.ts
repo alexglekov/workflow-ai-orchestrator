@@ -1,4 +1,4 @@
-export type TriggerType = 'schedule' | 'webhook' | 'mail';
+export type TriggerType = 'schedule' | 'webhook' | 'mail' | 'telegram';
 
 export interface WorkflowTrigger {
   id: string;

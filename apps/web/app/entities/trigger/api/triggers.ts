@@ -6,7 +6,12 @@ export const fetchTriggers = (workflowId: string) =>
 
 export const createTrigger = (
   workflowId: string,
-  payload: { type: TriggerType; everyMinutes?: number; at?: string },
+  payload: {
+    type: TriggerType;
+    everyMinutes?: number;
+    at?: string;
+    timezone?: string;
+  },
 ) =>
   http<WorkflowTrigger>(`/workflows/${workflowId}/triggers`, {
     method: 'POST',
@@ -15,7 +20,12 @@ export const createTrigger = (
 
 export const updateTrigger = (
   id: string,
-  payload: { enabled?: boolean; everyMinutes?: number; at?: string | null },
+  payload: {
+    enabled?: boolean;
+    everyMinutes?: number;
+    at?: string | null;
+    timezone?: string;
+  },
 ) =>
   http<WorkflowTrigger>(`/triggers/${id}`, {
     method: 'PATCH',

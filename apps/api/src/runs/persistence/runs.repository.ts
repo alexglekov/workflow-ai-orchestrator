@@ -6,6 +6,8 @@ const stepsInclude = {
   steps: { orderBy: { order: 'asc' as const } },
 };
 
+const STALE_MS = 120_000;
+
 @Injectable()
 export class RunsRepository {
   constructor(private readonly prisma: PrismaService) {}
@@ -53,6 +55,7 @@ export class RunsRepository {
     const found = await this.prisma.run.findFirst({
       where: {
         workflowId,
+        cancelRequested: false,
         status: { in: ['pending', 'running'] },
       },
       select: { id: true },
@@ -61,12 +64,84 @@ export class RunsRepository {
     return Boolean(found);
   };
 
+  heartbeat = (id: string) =>
+    this.prisma.run.update({
+      where: { id },
+      data: { lockedAt: new Date() },
+    });
+
+  requestCancel = async (id: string) => {
+    const current = await this.prisma.run.findUnique({ where: { id } });
+
+    if (!current) {
+      return null;
+    }
+
+    if (!['pending', 'running'].includes(current.status)) {
+      return this.prisma.run.findUnique({
+        where: { id },
+        include: stepsInclude,
+      });
+    }
+
+    const status = current.status === 'pending' ? 'cancelled' : current.status;
+
+    return this.prisma.run.update({
+      where: { id },
+      data: {
+        cancelRequested: true,
+        status,
+        finishedAt: status === 'cancelled' ? new Date() : current.finishedAt,
+      },
+      include: stepsInclude,
+    });
+  };
+
+  claimNext = async (workerId: string) => {
+    const stale = new Date(Date.now() - STALE_MS);
+
+    return this.prisma.$transaction(async (tx) => {
+      const rows = await tx.$queryRaw<Array<{ id: string }>>`
+        SELECT id FROM "Run"
+        WHERE "cancelRequested" = false
+          AND (
+            status = 'pending'
+            OR (status = 'running' AND ("lockedAt" IS NULL OR "lockedAt" < ${stale}))
+          )
+        ORDER BY "createdAt" ASC
+        LIMIT 1
+        FOR UPDATE SKIP LOCKED
+      `;
+
+      const id = rows[0]?.id;
+
+      if (!id) {
+        return null;
+      }
+
+      const current = await tx.run.findUnique({ where: { id } });
+
+      return tx.run.update({
+        where: { id },
+        data: {
+          status: 'running',
+          lockedBy: workerId,
+          lockedAt: new Date(),
+          startedAt: current?.startedAt ?? new Date(),
+        },
+        include: stepsInclude,
+      });
+    });
+  };
+
   update = (
     id: string,
     data: {
       status: string;
       startedAt?: Date;
       finishedAt?: Date;
+      lockedAt?: Date | null;
+      lockedBy?: string | null;
     },
   ) =>
     this.prisma.run.update({

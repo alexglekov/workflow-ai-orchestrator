@@ -1,3 +1,28 @@
+const API_KEY_STORAGE = 'ai-worker-api-key';
+
+export class ApiUnauthorizedError extends Error {
+  constructor(message = 'Нужен пароль API') {
+    super(message);
+    this.name = 'ApiUnauthorizedError';
+  }
+}
+
+export const getApiKey = () => {
+  if (typeof sessionStorage === 'undefined') {
+    return '';
+  }
+
+  return sessionStorage.getItem(API_KEY_STORAGE) ?? '';
+};
+
+export const setApiKey = (value: string) => {
+  sessionStorage.setItem(API_KEY_STORAGE, value);
+};
+
+export const clearApiKey = () => {
+  sessionStorage.removeItem(API_KEY_STORAGE);
+};
+
 const messageFromBody = (raw: string, fallback: string) => {
   if (!raw) {
     return fallback;
@@ -20,12 +45,38 @@ const messageFromBody = (raw: string, fallback: string) => {
   return fallback;
 };
 
+const headerRecord = (headers?: HeadersInit): Record<string, string> => {
+  if (!headers) {
+    return {};
+  }
+
+  if (headers instanceof Headers) {
+    return Object.fromEntries(headers.entries());
+  }
+
+  if (Array.isArray(headers)) {
+    return Object.fromEntries(headers);
+  }
+
+  return headers;
+};
+
 export const http = async <T>(path: string, init?: RequestInit): Promise<T> => {
+  const { headers, ...rest } = init ?? {};
+  const key = getApiKey();
   const response = await fetch(`/api${path}`, {
-    headers: { 'Content-Type': 'application/json', ...(init?.headers || {}) },
-    ...init,
+    ...rest,
+    headers: {
+      'Content-Type': 'application/json',
+      ...(key ? { 'X-Api-Key': key } : {}),
+      ...headerRecord(headers),
+    },
   });
   const raw = await response.text();
+
+  if (response.status === 401) {
+    throw new ApiUnauthorizedError(messageFromBody(raw, 'Нужен пароль API'));
+  }
 
   if (!response.ok) {
     const fromApi = messageFromBody(raw, '');

@@ -1,4 +1,4 @@
-import type { TemplateContext } from '@ai-worker/connectors';
+import type { ConnectorRuntime, TemplateContext } from '@ai-worker/connectors';
 
 export interface ParsedStep {
   title: string;
@@ -19,7 +19,12 @@ export interface EngineStep {
   iterate?: boolean;
 }
 
-export type StepStatus = 'pending' | 'running' | 'success' | 'error';
+export type StepStatus =
+  | 'pending'
+  | 'running'
+  | 'success'
+  | 'error'
+  | 'cancelled';
 
 export interface StepUpdate {
   stepId: string;
@@ -41,6 +46,7 @@ export interface RunWorkflowOptions {
           previousResult: unknown;
           credentials: Record<string, string>;
           context?: TemplateContext;
+          runtime?: ConnectorRuntime;
         }) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
       }
     | undefined;
@@ -50,4 +56,11 @@ export interface RunWorkflowOptions {
   ) => Promise<Record<string, string>>;
   onStepUpdate: (update: StepUpdate) => Promise<void>;
   initialInput?: unknown;
+  runtime?: ConnectorRuntime;
+  priorSteps?: Array<{
+    stepId: string;
+    status: string;
+    output?: unknown;
+  }>;
+  shouldCancel?: () => Promise<boolean> | boolean;
 }

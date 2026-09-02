@@ -648,6 +648,11 @@ p {
   color: var(--warn);
 }
 
+.status-cancelled {
+  background: #f3f3f6;
+  color: var(--muted);
+}
+
 .banner {
   padding: 11px 14px;
   margin: 0 auto 12px;
@@ -2029,6 +2034,11 @@ button.chevron:hover {
 .run-meta-card code {
   font-size: 11px;
   word-break: break-word;
+}
+
+.dialog-sheet.api-gate {
+  margin: 48px auto;
+  max-width: 420px;
 }
 
 .dialog-sheet {

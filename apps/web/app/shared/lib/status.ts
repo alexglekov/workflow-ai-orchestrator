@@ -23,6 +23,10 @@ export const runStatusLabel = (status: string) => {
     return 'ошибка';
   }
 
+  if (status === 'cancelled') {
+    return 'отменён';
+  }
+
   return 'ожидает';
 };
 
@@ -37,6 +41,10 @@ export const stepStatusLabel = (status: string) => {
 
   if (status === 'error') {
     return 'ошибка';
+  }
+
+  if (status === 'cancelled') {
+    return 'отменён';
   }
 
   return 'ожидает';

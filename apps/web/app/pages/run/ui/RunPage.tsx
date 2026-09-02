@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useAtom } from 'jotai';
-import { fetchRun, retryRun, runAtom } from '~/entities/run';
+import { cancelRun, fetchRun, retryRun, runAtom } from '~/entities/run';
 import { errorAtom } from '~/shared/model/ui';
 import { connectorVisual } from '~/shared/lib/connector-visuals';
 import { runStatusLabel, stepStatusLabel } from '~/shared/lib/status';
@@ -9,12 +9,32 @@ import { Banner } from '~/shared/ui/Banner';
 import { Icon } from '~/shared/ui/Icon';
 import { StatusBadge } from '~/shared/ui/StatusBadge';
 
+const active = (status: string) =>
+  status === 'running' || status === 'pending';
+
+const pretty = (value: unknown) => {
+  if (value == null) {
+    return '';
+  }
+
+  if (typeof value === 'string') {
+    return value;
+  }
+
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+};
+
 export const RunPage = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [run, setRun] = useAtom(runAtom);
   const [error, setError] = useAtom(errorAtom);
   const [retrying, setRetrying] = useState(false);
+  const [cancelling, setCancelling] = useState(false);
 
   useEffect(() => {
     if (!id) {
@@ -35,7 +55,7 @@ export const RunPage = () => {
         setRun(next);
         setError(null);
 
-        if (next.status === 'running' || next.status === 'pending') {
+        if (active(next.status)) {
           timer = window.setTimeout(() => void tick(), 1000);
         }
       } catch (err) {
@@ -79,7 +99,37 @@ export const RunPage = () => {
         <h1>Run</h1>
         <div className="chrome-actions">
           <StatusBadge status={run.status} label={runStatusLabel(run.status)} />
-          {run.status === 'error' ? (
+          {active(run.status) ? (
+            <button
+              type="button"
+              className="icon-btn"
+              disabled={cancelling}
+              aria-label="Остановить"
+              onClick={() => {
+                if (!id || cancelling) {
+                  return;
+                }
+
+                setCancelling(true);
+                void cancelRun(id)
+                  .then((next) => {
+                    setRun(next);
+                    setCancelling(false);
+                  })
+                  .catch((err) => {
+                    setError(
+                      err instanceof Error
+                        ? err.message
+                        : 'Не удалось остановить',
+                    );
+                    setCancelling(false);
+                  });
+              }}
+            >
+              <Icon name="close" size={16} />
+            </button>
+          ) : null}
+          {run.status === 'error' || run.status === 'cancelled' ? (
             <button
               type="button"
               className="icon-btn"
@@ -121,6 +171,8 @@ export const RunPage = () => {
         <div className="flow">
           {run.steps.map((step, index) => {
             const visual = connectorVisual(step.connectorId);
+            const params = pretty(step.input);
+            const output = pretty(step.output);
 
             return (
               <div key={step.id} style={{ width: '100%' }}>
@@ -145,10 +197,17 @@ export const RunPage = () => {
                     />
                   </div>
                   {step.error ? <Banner>{step.error}</Banner> : null}
-                  {step.output != null ? (
-                    <pre className="code-block">
-                      {JSON.stringify(step.output, null, 2)}
-                    </pre>
+                  {params ? (
+                    <>
+                      <p className="muted">Параметры</p>
+                      <pre className="code-block">{params}</pre>
+                    </>
+                  ) : null}
+                  {output ? (
+                    <>
+                      <p className="muted">Результат</p>
+                      <pre className="code-block">{output}</pre>
+                    </>
                   ) : null}
                 </article>
               </div>

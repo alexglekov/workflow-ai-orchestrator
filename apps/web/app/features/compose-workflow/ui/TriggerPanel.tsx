@@ -3,6 +3,7 @@ import {
   timingLabel,
   triggerAt,
   triggerMinutes,
+  triggerTimezone,
 } from '~/entities/trigger';
 import { Icon } from '~/shared/ui/Icon';
 import { TriggerTiming } from './TriggerTiming';
@@ -14,6 +15,10 @@ const label = (type: string) => {
 
   if (type === 'mail') {
     return 'Новые письма';
+  }
+
+  if (type === 'telegram') {
+    return 'Telegram';
   }
 
   return 'Расписание';
@@ -30,7 +35,12 @@ export const TriggerPanel = ({
   onOpenPicker: (type?: TriggerType) => void;
   onToggle: (id: string, enabled: boolean) => void;
   onRemove: (id: string) => void;
-  onTiming: (id: string, everyMinutes: number, at: string) => void;
+  onTiming: (
+    id: string,
+    everyMinutes: number,
+    at: string,
+    timezone: string,
+  ) => void;
 }) => (
   <aside className="rail-panel">
     <div className="rail-head">
@@ -50,7 +60,9 @@ export const TriggerPanel = ({
                     ? 'link'
                     : trigger.type === 'mail'
                       ? 'target'
-                      : 'clock'
+                      : trigger.type === 'telegram'
+                        ? 'send'
+                        : 'clock'
                 }
                 size={15}
               />
@@ -60,7 +72,13 @@ export const TriggerPanel = ({
               <span>
                 {trigger.type === 'webhook'
                   ? 'HTTP POST'
-                  : timingLabel(triggerMinutes(trigger), triggerAt(trigger))}
+                  : trigger.type === 'telegram' && trigger.webhookUrl
+                    ? 'Webhook бота / опрос'
+                    : timingLabel(
+                        triggerMinutes(trigger),
+                        triggerAt(trigger),
+                        triggerTimezone(trigger),
+                      )}
               </span>
             </div>
             <button
@@ -78,7 +96,8 @@ export const TriggerPanel = ({
             >
               <Icon name="trash" size={14} />
             </button>
-            {trigger.type === 'webhook' && trigger.webhookUrl ? (
+            {trigger.webhookUrl &&
+            (trigger.type === 'webhook' || trigger.type === 'telegram') ? (
               <code className="trigger-url">{trigger.webhookUrl}</code>
             ) : null}
             {trigger.type === 'webhook' ? null : (
@@ -86,8 +105,14 @@ export const TriggerPanel = ({
                 <TriggerTiming
                   everyMinutes={triggerMinutes(trigger)}
                   at={triggerAt(trigger)}
+                  timezone={triggerTimezone(trigger)}
                   onChange={(next) =>
-                    onTiming(trigger.id, next.everyMinutes, next.at)
+                    onTiming(
+                      trigger.id,
+                      next.everyMinutes,
+                      next.at,
+                      next.timezone,
+                    )
                   }
                 />
               </div>
@@ -112,6 +137,14 @@ export const TriggerPanel = ({
       >
         <Icon name="target" size={14} />
         Почта
+      </button>
+      <button
+        type="button"
+        className="rail-add"
+        onClick={() => onOpenPicker('telegram')}
+      >
+        <Icon name="send" size={14} />
+        Telegram
       </button>
       <button
         type="button"

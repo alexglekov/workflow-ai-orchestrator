@@ -19,14 +19,15 @@ model Connection {
 }
 
 model Workflow {
-  id        String         @id @default(uuid())
+  id        String          @id @default(uuid())
   name      String
-  prompt    String         @default("")
+  prompt    String          @default("")
   steps     WorkflowStep[]
   runs      Run[]
   triggers  Trigger[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  state     WorkflowState[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 }
 
 model WorkflowStep {
@@ -61,17 +62,23 @@ model Trigger {
 }
 
 model Run {
-  id         String    @id @default(uuid())
-  workflowId String
-  workflow   Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  status     String    @default("pending")
-  source     String    @default("manual")
-  triggerId  String?
-  input      Json?
-  startedAt  DateTime?
-  finishedAt DateTime?
-  steps      RunStep[]
-  createdAt  DateTime  @default(now())
+  id               String    @id @default(uuid())
+  workflowId       String
+  workflow         Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status           String    @default("pending")
+  source           String    @default("manual")
+  triggerId        String?
+  input            Json?
+  lockedAt         DateTime?
+  lockedBy         String?
+  cancelRequested  Boolean   @default(false)
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  steps            RunStep[]
+  createdAt        DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([workflowId, status])
 }
 
 model RunStep {
@@ -91,4 +98,16 @@ model RunStep {
   finishedAt     DateTime?
 
   @@index([runId, order])
+}
+
+model WorkflowState {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  key        String
+  value      Json
+  updatedAt  DateTime @updatedAt
+
+  @@unique([workflowId, key])
+  @@index([workflowId])
 }

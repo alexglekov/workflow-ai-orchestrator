@@ -1,3 +1,4 @@
+import { completeLlm } from '@ai-worker/connectors';
 import { agentConfig } from '../config';
 import {
   ASK_SYSTEM_PROMPT,
@@ -25,14 +26,14 @@ export class OpenAiAgent implements AgentProvider {
     const text = await this.complete(
       [
         {
-          role: 'system',
+          role: 'system' as const,
           content: `${ASK_SYSTEM_PROMPT}\n\n${contextBlock(input.context)}`,
         },
         ...recentHistory(input.history).map((item) => ({
           role: item.role,
           content: item.content,
         })),
-        { role: 'user', content: input.message },
+        { role: 'user' as const, content: input.message },
       ],
       0.4,
     );
@@ -44,7 +45,7 @@ export class OpenAiAgent implements AgentProvider {
     const text = await this.complete(
       [
         {
-          role: 'system',
+          role: 'system' as const,
           content: `${PLAN_SYSTEM_PROMPT}\n\n${contextBlock(input.context)}`,
         },
         ...recentHistory(input.history).map((item) => ({
@@ -52,7 +53,7 @@ export class OpenAiAgent implements AgentProvider {
           content: item.content,
         })),
         {
-          role: 'user',
+          role: 'user' as const,
           content:
             input.prompt === input.message
               ? input.message
@@ -66,46 +67,18 @@ export class OpenAiAgent implements AgentProvider {
     return parsePlanResponse(text, this.id);
   };
 
-  private complete = async (
-    messages: Array<{ role: string; content: string }>,
+  private complete = (
+    messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }>,
     temperature: number,
     json = false,
-  ) => {
-    const key = agentConfig.openaiKey();
-
-    if (!key) {
-      throw new Error('Не задан OPENAI_API_KEY');
-    }
-
-    const base = agentConfig.openaiBaseUrl().replace(/\/+$/, '');
-    const response = await fetch(`${base}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${key}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: agentConfig.openaiModel(),
-        temperature,
-        messages,
-        ...(json ? { response_format: { type: 'json_object' } } : {}),
-      }),
+  ) =>
+    completeLlm({
+      provider: 'openai',
+      apiKey: agentConfig.openaiKey(),
+      model: agentConfig.openaiModel(),
+      baseUrl: agentConfig.openaiBaseUrl(),
+      messages,
+      temperature,
+      json,
     });
-    const body = (await response.json()) as {
-      error?: { message?: string };
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-
-    if (!response.ok) {
-      throw new Error(body.error?.message || `OpenAI HTTP ${response.status}`);
-    }
-
-    const text = body.choices?.[0]?.message?.content?.trim();
-
-    if (!text) {
-      throw new Error('OpenAI вернул пустой ответ');
-    }
-
-    return text;
-  };
 }

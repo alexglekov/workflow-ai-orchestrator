@@ -20,6 +20,12 @@ export class ConnectionsRepository {
       orderBy: { updatedAt: 'desc' },
     });
 
+  findByConnector = (connectorId: string) =>
+    this.prisma.connection.findMany({
+      where: { connectorId },
+      orderBy: { createdAt: 'asc' },
+    });
+
   create = (data: {
     connectorId: string;
     name: string;

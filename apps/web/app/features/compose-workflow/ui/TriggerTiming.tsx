@@ -1,13 +1,19 @@
-import { INTERVAL_OPTIONS } from '~/entities/trigger';
+import { INTERVAL_OPTIONS, TIMEZONES, DEFAULT_TIMEZONE } from '~/entities/trigger';
 
 export const TriggerTiming = ({
   everyMinutes,
   at,
+  timezone = DEFAULT_TIMEZONE,
   onChange,
 }: {
   everyMinutes: number;
   at: string;
-  onChange: (next: { everyMinutes: number; at: string }) => void;
+  timezone?: string;
+  onChange: (next: {
+    everyMinutes: number;
+    at: string;
+    timezone: string;
+  }) => void;
 }) => {
   const mode = at ? 'daily' : 'interval';
 
@@ -25,11 +31,15 @@ export const TriggerTiming = ({
             const value = event.target.value;
 
             if (value === 'daily') {
-              onChange({ everyMinutes: 1440, at: at || '09:00' });
+              onChange({
+                everyMinutes: 1440,
+                at: at || '09:00',
+                timezone: timezone || DEFAULT_TIMEZONE,
+              });
               return;
             }
 
-            onChange({ everyMinutes: Number(value), at: '' });
+            onChange({ everyMinutes: Number(value), at: '', timezone });
           }}
         >
           {INTERVAL_OPTIONS.map((item) => (
@@ -44,19 +54,41 @@ export const TriggerTiming = ({
         </select>
       </label>
       {mode === 'daily' ? (
-        <label>
-          Время
-          <input
-            type="time"
-            value={at || '09:00'}
-            onChange={(event) =>
-              onChange({
-                everyMinutes: 1440,
-                at: event.target.value || '09:00',
-              })
-            }
-          />
-        </label>
+        <>
+          <label>
+            Время
+            <input
+              type="time"
+              value={at || '09:00'}
+              onChange={(event) =>
+                onChange({
+                  everyMinutes: 1440,
+                  at: event.target.value || '09:00',
+                  timezone: timezone || DEFAULT_TIMEZONE,
+                })
+              }
+            />
+          </label>
+          <label>
+            Часовой пояс
+            <select
+              value={timezone || DEFAULT_TIMEZONE}
+              onChange={(event) =>
+                onChange({
+                  everyMinutes: 1440,
+                  at: at || '09:00',
+                  timezone: event.target.value,
+                })
+              }
+            >
+              {TIMEZONES.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.label}
+                </option>
+              ))}
+            </select>
+          </label>
+        </>
       ) : null}
     </div>
   );

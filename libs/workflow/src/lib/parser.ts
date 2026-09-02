@@ -41,6 +41,7 @@ export const fallbackParse = (
       name: 'Mail',
       actions: [
         { id: 'fetch_new', name: 'Получить новые письма' },
+        { id: 'search', name: 'Найти письма' },
         { id: 'send', name: 'Отправить письмо' },
       ],
     },
@@ -50,7 +51,13 @@ export const fallbackParse = (
       actions: [
         { id: 'search', name: 'Найти в вебе' },
         { id: 'fetch', name: 'Открыть страницу' },
+        { id: 'rates', name: 'Курсы BestChange' },
       ],
+    },
+    {
+      id: 'browser',
+      name: 'Browser',
+      actions: [{ id: 'open', name: 'Открыть страницу' }],
     },
     {
       id: 'excel',
@@ -62,14 +69,61 @@ export const fallbackParse = (
       ],
     },
     {
+      id: 'llm',
+      name: 'LLM',
+      actions: [
+        { id: 'extract', name: 'Извлечь поля' },
+        { id: 'classify', name: 'Классифицировать' },
+        { id: 'generate', name: 'Сгенерировать текст' },
+        { id: 'transcribe', name: 'Распознать речь' },
+        { id: 'speak', name: 'Озвучить текст' },
+      ],
+    },
+    {
+      id: 'transform',
+      name: 'Transform',
+      actions: [
+        { id: 'filter', name: 'Отфильтровать' },
+        { id: 'sort', name: 'Отсортировать' },
+        { id: 'pick', name: 'Выбрать поля' },
+        { id: 'join', name: 'Склеить список' },
+        { id: 'template', name: 'Собрать текст' },
+      ],
+    },
+    {
+      id: 'memory',
+      name: 'Memory',
+      actions: [
+        { id: 'get', name: 'Прочитать' },
+        { id: 'set', name: 'Записать' },
+      ],
+    },
+    {
       id: 'onec',
       name: '1С',
-      actions: [{ id: 'create_record', name: 'Создать запись' }],
+      actions: [
+        { id: 'query', name: 'Найти записи' },
+        { id: 'get', name: 'Прочитать запись' },
+        { id: 'create_record', name: 'Создать запись' },
+        { id: 'update', name: 'Обновить запись' },
+      ],
     },
     {
       id: 'telegram',
       name: 'Telegram',
-      actions: [{ id: 'send_message', name: 'Отправить сообщение' }],
+      actions: [
+        { id: 'get_updates', name: 'Получить входящие' },
+        { id: 'send_message', name: 'Отправить сообщение' },
+        { id: 'send_voice', name: 'Отправить голосовое' },
+      ],
+    },
+    {
+      id: 'social',
+      name: 'Social',
+      actions: [
+        { id: 'followers', name: 'Подписчики' },
+        { id: 'reels', name: 'Рилсы' },
+      ],
     },
   ]);
 };
@@ -109,7 +163,8 @@ export const parsePromptToSteps = async (
 Доступные коннекторы и параметры: ${JSON.stringify(catalogJson(connectors))}.
 Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{},"iterate":false}]}.
 Параметры бери из текста пользователя. Данные между шагами: {{previous.field}}, {{item.field}}, {{input.field}}, {{steps.1.field}}.
-iterate: true — если шаг для каждого письма или строки.`,
+iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates, social.followers, social.reels и onec.query без iterate.
+Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Instagram/VK/LinkedIn — social. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
             },
             { role: 'user', content: prompt },
           ],

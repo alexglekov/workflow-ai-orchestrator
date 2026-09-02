@@ -11,8 +11,8 @@ import {
 } from 'class-validator';
 
 export class CreateTriggerDto {
-  @IsIn(['schedule', 'webhook', 'mail'])
-  type!: 'schedule' | 'webhook' | 'mail';
+  @IsIn(['schedule', 'webhook', 'mail', 'telegram'])
+  type!: 'schedule' | 'webhook' | 'mail' | 'telegram';
 
   @IsOptional()
   @IsBoolean()
@@ -29,6 +29,9 @@ export class CreateTriggerDto {
   @ValidateIf((_, value) => value != null && value !== '')
   @Matches(/^\d{2}:\d{2}$/)
   at?: string;
+
+  @IsOptional()
+  timezone?: string;
 
   @IsOptional()
   @IsObject()
@@ -51,6 +54,9 @@ export class UpdateTriggerDto {
   @ValidateIf((_, value) => value != null && value !== '')
   @Matches(/^\d{2}:\d{2}$/)
   at?: string | null;
+
+  @IsOptional()
+  timezone?: string;
 
   @IsOptional()
   @IsObject()

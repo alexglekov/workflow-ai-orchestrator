@@ -132,9 +132,45 @@ export const ConnectorCard = ({
           </div>
           {connector.id === 'web' ? (
             <p className="muted">
-              Подключать аккаунт не обязательно. Поиск идёт через DuckDuckGo;
-              Brave API — если HTML-поиск режут. Сайт логина этим шагом не
-              открыть.
+              Подключать аккаунт не обязательно. Поиск — DuckDuckGo, курсы
+              BestChange — шаг «Курсы» (архив API, не HTML-страница). Сайт
+              логина этим шагом не открыть. Поля из страницы достаёт шаг LLM.
+            </p>
+          ) : null}
+          {connector.id === 'browser' ? (
+            <p className="muted">
+              Chromium через Playwright: SPA и страницы с JavaScript. На машине
+              worker выполните npx playwright install chromium. Cookies —
+              необязательный storageState JSON. Парк аккаунтов этим шагом не
+              автоматизируется.
+            </p>
+          ) : null}
+          {connector.id === 'llm' ? (
+            <p className="muted">
+              Подключать не обязательно, если в .env задан GEMINI_API_KEY или
+              OPENAI_API_KEY. Ключ в карточке нужен, только чтобы переопределить
+              окружение.
+            </p>
+          ) : null}
+          {connector.id === 'transform' ? (
+            <p className="muted">
+              Учётные данные не нужны. Фильтр, сортировка и сборка текста
+              выполняются локально.
+            </p>
+          ) : null}
+          {connector.id === 'memory' ? (
+            <p className="muted">
+              Память между запусками этого workflow: intent, file_id голосового,
+              offset Telegram. Подключать ничего не нужно.
+            </p>
+          ) : null}
+          {connector.id === 'social' ? (
+            <p className="muted">
+              VK — access token. Instagram — Graph token и user id
+              профессионального аккаунта (Business Discovery). Просмотры чужих
+              Reels Graph не отдаёт: укажите HTTP-провайдер (base URL + ключ,
+              пути /followers и /reels). LinkedIn — только страницы компаний,
+              не личные профили. web.fetch эти сайты не открывает.
             </p>
           ) : null}
           {connections.length ? (

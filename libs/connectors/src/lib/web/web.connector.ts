@@ -9,6 +9,7 @@ import {
   mergeContext,
 } from '../interpolate';
 import { webFetch, webSearch } from './client';
+import { bestchangeRates } from './bestchange';
 
 const braveKey = (credentials: Record<string, string>) =>
   firstNonEmpty(
@@ -62,7 +63,7 @@ export const webConnector: Connector = {
   id: 'web',
   name: 'Web',
   description:
-    'Поиск и чтение публичных страниц: ИНН, BestChange, справки. Без отдельной CRM — лид пишите в 1С',
+    'Поиск и чтение публичных страниц: ИНН, BestChange, справки. Структуру из текста достаёт llm.extract',
   credentialFields: [
     {
       key: 'braveApiKey',
@@ -101,6 +102,13 @@ export const webConnector: Connector = {
           description: 'Обрезка текста, по умолчанию 12000',
         },
       },
+    },
+    {
+      id: 'rates',
+      name: 'Курсы BestChange',
+      description:
+        'BTC/LTC/USDT → RUB из api.bestchange.ru/info.zip, без JS-страницы',
+      paramsSchema: {},
     },
   ],
   testConnection: async (credentials) => {
@@ -162,6 +170,12 @@ export const webConnector: Connector = {
           url,
           maxChars: Number(params['maxChars'] || 12_000),
         });
+
+        return { ok: true, data };
+      }
+
+      if (input.action === 'rates') {
+        const data = await bestchangeRates();
 
         return { ok: true, data };
       }

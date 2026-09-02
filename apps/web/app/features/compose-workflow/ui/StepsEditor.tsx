@@ -2,7 +2,7 @@ import { useState, type CSSProperties } from 'react';
 import type { Connection } from '~/entities/connection';
 import type { ConnectorCatalog } from '~/entities/connector';
 import type { WorkflowStep } from '~/entities/workflow';
-import { connectorVisual } from '~/shared/lib/connector-visuals';
+import { connectorNeedsAccount, connectorVisual } from '~/shared/lib/connector-visuals';
 import { Icon } from '~/shared/ui/Icon';
 
 export const StepsEditor = ({
@@ -35,7 +35,9 @@ export const StepsEditor = ({
         );
         const visual = connectorVisual(step.connectorId);
         const expanded = open === index;
-        const needsAccount = availableConnections.length === 0;
+        const needsAccount =
+          connectorNeedsAccount(step.connectorId) &&
+          availableConnections.length === 0;
         const last = index === steps.length - 1;
 
         return (
@@ -181,7 +183,10 @@ export const StepsEditor = ({
                   </label>
                   <p className="muted">
                     Плейсхолдеры: {'{{previous}}'}, {'{{item.subject}}'},{' '}
-                    {'{{input.field}}'}, {'{{steps.1.field}}'}
+                    {'{{input.field}}'}, {'{{steps.1.field}}'}. skipIfEmpty:
+                    true — пропустить шаг, если список пуст. when —
+                    {' "{{previous.label}} = intervene"'}. timeoutMs — лимит
+                    шага в миллисекундах.
                   </p>
                   <label>
                     Параметры (JSON)

@@ -1,11 +1,13 @@
 import { Injectable, NotFoundException } from '@nestjs/common';
 import { parsePromptToSteps, STARTER_PROMPT, starterSteps } from '@ai-worker/workflow';
+import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
 import {
   CreateWorkflowDto,
   ParseWorkflowDto,
   UpdateWorkflowDto,
 } from './dto';
+import { WorkflowStepInput } from './persistence/workflow-step.input';
 import { WorkflowsRepository } from './persistence/workflows.repository';
 
 const DEMO_PROMPT = STARTER_PROMPT;
@@ -15,6 +17,7 @@ export class WorkflowsService {
   constructor(
     private readonly workflows: WorkflowsRepository,
     private readonly connectors: ConnectorRegistryService,
+    private readonly connections: ConnectionsService,
   ) {}
 
   list = () => this.workflows.findAll();
@@ -29,11 +32,13 @@ export class WorkflowsService {
     return workflow;
   };
 
-  create = (dto: CreateWorkflowDto) =>
+  create = async (dto: CreateWorkflowDto) =>
     this.workflows.create({
       name: dto.name || 'Новый workflow',
       prompt: dto.prompt || '',
-      steps: dto.steps,
+      steps: dto.steps
+        ? await this.bindSoleConnections(dto.steps)
+        : dto.steps,
     });
 
   update = async (id: string, dto: UpdateWorkflowDto) => {
@@ -42,7 +47,9 @@ export class WorkflowsService {
     return this.workflows.replace(id, {
       name: dto.name,
       prompt: dto.prompt,
-      steps: dto.steps,
+      steps: dto.steps
+        ? await this.bindSoleConnections(dto.steps)
+        : dto.steps,
     });
   };
 
@@ -67,10 +74,37 @@ export class WorkflowsService {
     });
   };
 
-  createDemo = () =>
+  createDemo = async () =>
     this.workflows.create({
       name: 'Письма → Excel → Telegram',
       prompt: DEMO_PROMPT,
-      steps: starterSteps(),
+      steps: await this.bindSoleConnections(starterSteps()),
     });
+
+  private bindSoleConnections = async (steps: WorkflowStepInput[]) => {
+    const ids = [...new Set(steps.map((step) => step.connectorId))];
+    const sole = new Map<string, string>();
+
+    await Promise.all(
+      ids.map(async (connectorId) => {
+        const id = await this.connections.soleId(connectorId);
+
+        if (id) {
+          sole.set(connectorId, id);
+        }
+      }),
+    );
+
+    return steps.map((step) => {
+      const current = step.connectionId?.trim();
+
+      if (current) {
+        return step;
+      }
+
+      const bound = sole.get(step.connectorId);
+
+      return bound ? { ...step, connectionId: bound } : step;
+    });
+  };
 }

@@ -123,6 +123,12 @@ export class ConnectionsService {
     };
   };
 
+  soleId = async (connectorId: string) => {
+    const rows = await this.connections.findByConnector(connectorId);
+
+    return rows.length === 1 ? rows[0].id : null;
+  };
+
   resolveCredentials = async (
     connectorId: string,
     connectionId?: string | null,

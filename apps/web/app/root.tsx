@@ -9,6 +9,7 @@ import {
 } from 'react-router';
 import { Provider } from 'jotai';
 import { Topbar } from '~/widgets/topbar';
+import { ApiGate } from '~/shared/ui/ApiGate';
 import '~/shared/styles/globals.css';
 
 export const meta: MetaFunction = () => [
@@ -49,6 +50,10 @@ export const Layout = ({ children }: { children: React.ReactNode }) => (
   </html>
 );
 
-const App = () => <Outlet />;
+const App = () => (
+  <ApiGate>
+    <Outlet />
+  </ApiGate>
+);
 
 export default App;

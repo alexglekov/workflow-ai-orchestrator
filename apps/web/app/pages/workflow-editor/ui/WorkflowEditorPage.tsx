@@ -395,6 +395,7 @@ export const WorkflowEditorPage = () => {
     type: TriggerType,
     everyMinutes?: number,
     at?: string,
+    timezone?: string,
   ) => {
     if (!id) {
       return;
@@ -403,7 +404,12 @@ export const WorkflowEditorPage = () => {
     setTriggerPickerOpen(false);
 
     try {
-      const created = await createTrigger(id, { type, everyMinutes, at });
+      const created = await createTrigger(id, {
+        type,
+        everyMinutes,
+        at,
+        timezone,
+      });
 
       setTriggers((current) => [...current, created]);
       setError(null);
@@ -416,11 +422,13 @@ export const WorkflowEditorPage = () => {
     triggerId: string,
     everyMinutes: number,
     at: string,
+    timezone: string,
   ) => {
     try {
       const next = await updateTrigger(triggerId, {
         everyMinutes,
         at: at || null,
+        timezone: at ? timezone : undefined,
       });
 
       setTriggers((current) =>
@@ -578,8 +586,8 @@ export const WorkflowEditorPage = () => {
             void toggleTrigger(triggerId, enabled)
           }
           onRemove={(triggerId) => void removeTrigger(triggerId)}
-          onTiming={(triggerId, everyMinutes, at) =>
-            void changeTriggerTiming(triggerId, everyMinutes, at)
+          onTiming={(triggerId, everyMinutes, at, timezone) =>
+            void changeTriggerTiming(triggerId, everyMinutes, at, timezone)
           }
         />
         <div className={`editor-main${empty ? ' is-empty' : ''}`}>
@@ -659,8 +667,8 @@ export const WorkflowEditorPage = () => {
           key={triggerPickerType}
           initialType={triggerPickerType}
           onClose={() => setTriggerPickerOpen(false)}
-          onPick={(type, everyMinutes, at) =>
-            void addTrigger(type, everyMinutes, at)
+          onPick={(type, everyMinutes, at, timezone) =>
+            void addTrigger(type, everyMinutes, at, timezone)
           }
         />
       ) : null}

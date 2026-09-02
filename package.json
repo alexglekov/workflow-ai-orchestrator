@@ -9,7 +9,10 @@
     "db:migrate": "prisma migrate deploy --schema=libs/data-access/prisma/schema.prisma",
     "db:migrate:dev": "prisma migrate dev --schema=libs/data-access/prisma/schema.prisma",
     "dev:api": "nx serve api",
+    "dev:worker": "nx serve worker",
     "dev:web": "nx serve web",
+    "dev": "nx run-many -t serve -p api,worker,web",
+    "test": "tsx --tsconfig tsconfig.base.json --test libs/workflow/src/lib/when.spec.ts libs/workflow/src/lib/catalog-plan.spec.ts libs/connectors/src/lib/interpolate.spec.ts libs/connectors/src/lib/web/zip.spec.ts apps/api/src/triggers/lib/is-due.spec.ts",
     "postinstall": "prisma generate --schema=libs/data-access/prisma/schema.prisma"
   },
   "prisma": {
@@ -39,6 +42,7 @@
     "nx": "23.1.2",
     "prettier": "~3.6.2",
     "tslib": "^2.3.0",
+    "tsx": "^4.23.13",
     "typescript": "~6.0.3",
     "vite": "^8.0.0",
     "webpack": "^5.101.3",
@@ -61,6 +65,7 @@
     "jotai": "^2.20.3",
     "mailparser": "^3.9.17",
     "nodemailer": "^9.0.6",
+    "playwright": "^1.62.1",
     "prisma": "^6.16.3",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",

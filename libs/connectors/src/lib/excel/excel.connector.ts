@@ -19,6 +19,90 @@ import {
 
 const HEADERS = ['Name', 'Phone', 'Company', 'Amount', 'CreatedAt'];
 
+const cellValue = (value: unknown): unknown => {
+  if (value == null) {
+    return '';
+  }
+
+  if (value instanceof Date) {
+    return value.toISOString();
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+
+    if (Array.isArray(record['richText'])) {
+      return (record['richText'] as Array<{ text?: string }>)
+        .map((part) => part.text || '')
+        .join('');
+    }
+
+    if (record['text'] != null) {
+      return record['text'];
+    }
+
+    if ('result' in record) {
+      return cellValue(record['result']);
+    }
+  }
+
+  return value;
+};
+
+const uniqueHeader = (name: string, used: Map<string, number>): string => {
+  const count = used.get(name) ?? 0;
+  used.set(name, count + 1);
+
+  return count === 0 ? name : `${name}_${count + 1}`;
+};
+
+const sheetToObjects = (
+  sheet: ExcelJS.Worksheet,
+  limit: number,
+): { headers: string[]; rows: Array<Record<string, unknown>> } => {
+  const headerRow = sheet.getRow(1);
+  const lastCol = Math.max(
+    headerRow.cellCount || 0,
+    sheet.columnCount || 0,
+    sheet.actualColumnCount || 0,
+  );
+
+  if (lastCol === 0) {
+    return { headers: [], rows: [] };
+  }
+
+  const used = new Map<string, number>();
+  const headers: string[] = [];
+
+  for (let col = 1; col <= lastCol; col += 1) {
+    const raw = String(cellValue(headerRow.getCell(col).value) ?? '').trim();
+    headers[col] = uniqueHeader(raw || `col${col}`, used);
+  }
+
+  const named = headers.filter(Boolean);
+  const rows: Array<Record<string, unknown>> = [];
+
+  sheet.eachRow((excelRow, index) => {
+    if (index === 1 || rows.length >= limit) {
+      return;
+    }
+
+    const row: Record<string, unknown> = {};
+
+    for (let col = 1; col <= lastCol; col += 1) {
+      const key = headers[col];
+
+      if (key) {
+        row[key] = cellValue(excelRow.getCell(col).value);
+      }
+    }
+
+    rows.push(row);
+  });
+
+  return { headers: named, rows };
+};
+
 const loadWorkbook = async (buffer: Buffer, sheetName: string) => {
   const workbook = new ExcelJS.Workbook();
 
@@ -167,12 +251,16 @@ export const excelConnector: Connector = {
     {
       id: 'read_rows',
       name: 'Прочитать строки',
-      description: 'Находит файл по имени и возвращает строки листа',
+      description:
+        'Находит файл по имени и возвращает строки как объекты {заголовок: значение}',
       paramsSchema: {
         fileName: { type: 'string', description: 'Название файла на Диске' },
         fileUrl: { type: 'string', description: 'Прямая ссылка на документ' },
         sheet: { type: 'string', description: 'Переопределить лист' },
-        limit: { type: 'number', description: 'Максимум строк' },
+        limit: {
+          type: 'number',
+          description: 'Максимум строк, по умолчанию 500, максимум 5000',
+        },
       },
     },
   ],
@@ -257,20 +345,20 @@ export const excelConnector: Connector = {
           };
         }
 
-        const limit = Number(ctx['limit'] || 100);
-        const rows: unknown[][] = [];
-
-        sheet.eachRow((excelRow, index) => {
-          if (index === 1 || rows.length >= limit) {
-            return;
-          }
-
-          rows.push(excelRow.values as unknown[]);
-        });
+        const limit = Math.min(
+          Math.max(Number(ctx['limit'] || 500) || 500, 1),
+          5000,
+        );
+        const { headers, rows } = sheetToObjects(sheet, limit);
 
         return {
           ok: true,
-          data: toFilePayload(file, { sheet: sheet.name, rows }),
+          data: toFilePayload(file, {
+            sheet: sheet.name,
+            headers,
+            rows,
+            count: rows.length,
+          }),
         };
       }
 

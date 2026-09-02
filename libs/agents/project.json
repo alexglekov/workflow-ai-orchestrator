@@ -4,6 +4,6 @@
   "sourceRoot": "libs/agents/src",
   "projectType": "library",
   "tags": [],
-  "implicitDependencies": ["workflow"],
+  "implicitDependencies": ["workflow", "connectors"],
   "targets": {}
 }

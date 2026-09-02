@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Icon } from '~/shared/ui/Icon';
 import {
   defaultMinutesFor,
+  DEFAULT_TIMEZONE,
   type TriggerType,
 } from '~/entities/trigger';
 import { TriggerTiming } from './TriggerTiming';
@@ -10,7 +11,7 @@ const OPTIONS: Array<{
   type: TriggerType;
   title: string;
   hint: string;
-  icon: 'clock' | 'target' | 'link';
+  icon: 'clock' | 'target' | 'link' | 'send';
   tone: 'green' | 'blue';
 }> = [
   {
@@ -25,6 +26,13 @@ const OPTIONS: Array<{
     title: 'Новые письма',
     hint: 'Опрос IMAP по интервалу',
     icon: 'target',
+    tone: 'blue',
+  },
+  {
+    type: 'telegram',
+    title: 'Telegram',
+    hint: 'Входящие сообщения бота',
+    icon: 'send',
     tone: 'blue',
   },
   {
@@ -43,11 +51,17 @@ export const TriggerPicker = ({
 }: {
   initialType?: TriggerType;
   onClose: () => void;
-  onPick: (type: TriggerType, everyMinutes?: number, at?: string) => void;
+  onPick: (
+    type: TriggerType,
+    everyMinutes?: number,
+    at?: string,
+    timezone?: string,
+  ) => void;
 }) => {
   const [type, setType] = useState<TriggerType>(initialType);
   const [everyMinutes, setEveryMinutes] = useState(defaultMinutesFor(initialType));
   const [at, setAt] = useState('');
+  const [timezone, setTimezone] = useState(DEFAULT_TIMEZONE);
 
   return (
     <div
@@ -101,14 +115,24 @@ export const TriggerPicker = ({
         {type === 'webhook' ? (
           <p className="muted">После создания появится URL для POST.</p>
         ) : (
-          <TriggerTiming
-            everyMinutes={everyMinutes}
-            at={at}
-            onChange={(next) => {
-              setEveryMinutes(next.everyMinutes);
-              setAt(next.at);
-            }}
-          />
+          <>
+            {type === 'telegram' ? (
+              <p className="muted">
+                Если PUBLIC_API_URL с https — бот получит webhook. Иначе опрос
+                getUpdates по интервалу ниже.
+              </p>
+            ) : null}
+            <TriggerTiming
+              everyMinutes={everyMinutes}
+              at={at}
+              timezone={timezone}
+              onChange={(next) => {
+                setEveryMinutes(next.everyMinutes);
+                setAt(next.at);
+                setTimezone(next.timezone);
+              }}
+            />
+          </>
         )}
         <div className="dialog-actions">
           <button type="button" className="btn ghost" onClick={onClose}>
@@ -122,6 +146,7 @@ export const TriggerPicker = ({
                 type,
                 type === 'webhook' ? undefined : everyMinutes,
                 type === 'webhook' ? undefined : at || undefined,
+                type === 'webhook' || !at ? undefined : timezone,
               )
             }
           >
