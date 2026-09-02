@@ -27,6 +27,8 @@
 
 Worker **не** импортирует `TriggersModule` — иначе был бы второй tick. Сборка: `npx nx serve api` и `npx nx serve worker` (webpack → `dist/apps/api` и `dist/apps/worker`).
 
+Прод: один хост DigitalOcean — Caddy (SPA + `/api`) + API + worker + Postgres (`infra/docker/docker-compose.prod.yml`). Все env из `.env` в api/worker. Один replica API. [docs/DEPLOY.md](./docs/DEPLOY.md).
+
 В каждом процессе:
 
 - PostgreSQL через Prisma (`libs/data-access`)
@@ -36,7 +38,8 @@ Worker **не** импортирует `TriggersModule` — иначе был б
 Только в API:
 
 - префикс `/api`, CORS, `ValidationPipe`
-- опционально `API_PASSWORD` (`X-Api-Key` / `Authorization: Bearer`). Без пароля, если переменная пустая. Открыты `/health`, `/auth/status`, `/hooks/:token`
+- опционально `API_PASSWORD` (`X-Api-Key` / `Authorization: Bearer`). В production пароль обязателен. Открыты `/health`, `/auth/status`, `/hooks/:token`
+- `CORS_ORIGIN` — если UI на другом origin; за Caddy на том же домене можно не задавать
 - триггеры: `setInterval` 20 с; `at` в явном поясе (`timezone` / `SCHEDULE_TZ`, по умолчанию `Europe/Moscow`), догон в тот же день
 
 Auth multi-tenant нет. Двойной tick двух инстансов API гасится CAS на `Trigger.lastFiredAt`.

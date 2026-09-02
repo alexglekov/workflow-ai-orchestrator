@@ -666,6 +666,8 @@ p {
   max-width: none;
   margin: 10px 0 0;
 }
+
+.banner.error {
   border-color: #fecdca;
   background: #fff6f5;
   color: var(--err);

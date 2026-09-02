@@ -1,0 +1,100 @@
+# DigitalOcean: one droplet, SPA + API + worker + Postgres.
+# From repo root:
+#   docker compose --env-file .env -f infra/docker/docker-compose.prod.yml up -d --build
+
+x-app-env: &app-env
+  NODE_ENV: production
+  DATABASE_URL: postgresql://${POSTGRES_USER:-aiworker}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-aiworker}?schema=public
+  ENCRYPTION_KEY: ${ENCRYPTION_KEY:?set ENCRYPTION_KEY}
+  API_PASSWORD: ${API_PASSWORD:?set API_PASSWORD}
+  PUBLIC_API_URL: ${PUBLIC_API_URL:-}
+  CORS_ORIGIN: ${CORS_ORIGIN:-}
+  SCHEDULE_TZ: ${SCHEDULE_TZ:-Europe/Moscow}
+  AGENT_PROVIDER: ${AGENT_PROVIDER:-gemini}
+  GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+  GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
+  GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
+  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
+  OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
+  OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-alloy}
+  OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
+  BRAVE_API_KEY: ${BRAVE_API_KEY:-}
+  VK_ACCESS_TOKEN: ${VK_ACCESS_TOKEN:-}
+  VK_API_VERSION: ${VK_API_VERSION:-5.199}
+  INSTAGRAM_ACCESS_TOKEN: ${INSTAGRAM_ACCESS_TOKEN:-}
+  INSTAGRAM_USER_ID: ${INSTAGRAM_USER_ID:-}
+  INSTAGRAM_GRAPH_VERSION: ${INSTAGRAM_GRAPH_VERSION:-v21.0}
+  LINKEDIN_ACCESS_TOKEN: ${LINKEDIN_ACCESS_TOKEN:-}
+  LINKEDIN_VERSION: ${LINKEDIN_VERSION:-202401}
+  SOCIAL_PROVIDER_BASE_URL: ${SOCIAL_PROVIDER_BASE_URL:-}
+  SOCIAL_PROVIDER_API_KEY: ${SOCIAL_PROVIDER_API_KEY:-}
+  WEB_USER_AGENT: ${WEB_USER_AGENT:-}
+  PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH: ${PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH:-}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-aiworker}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB:-aiworker}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U "$$POSTGRES_USER" -d "$$POSTGRES_DB"']
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+      PORT: '3000'
+    healthcheck:
+      test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3000/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
+      interval: 15s
+      timeout: 5s
+      retries: 8
+
+  worker:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.worker
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      <<: *app-env
+
+  web:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.web
+    restart: unless-stopped
+    depends_on:
+      api:
+        condition: service_healthy
+    ports:
+      - '80:80'
+      - '443:443'
+    environment:
+      CADDY_SITE: ${CADDY_SITE:-http://:80}
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:

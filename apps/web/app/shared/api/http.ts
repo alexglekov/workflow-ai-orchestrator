@@ -61,10 +61,19 @@ const headerRecord = (headers?: HeadersInit): Record<string, string> => {
   return headers;
 };
 
+const apiRoot = () => {
+  const base = String(import.meta.env.VITE_API_URL || '')
+    .trim()
+    .replace(/\/+$/, '')
+    .replace(/\/api$/i, '');
+
+  return base ? `${base}/api` : '/api';
+};
+
 export const http = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const { headers, ...rest } = init ?? {};
   const key = getApiKey();
-  const response = await fetch(`/api${path}`, {
+  const response = await fetch(`${apiRoot()}${path}`, {
     ...rest,
     headers: {
       'Content-Type': 'application/json',

@@ -14,6 +14,8 @@ MVP: пользователь описывает задачу текстом, с
 
 Устройство API (модули, потоки, почему нет портов на CRUD): [ARCHITECTURE.md](./ARCHITECTURE.md).
 
+Деплой: один Droplet DigitalOcean (SPA + API + worker + Postgres). Пошагово: [docs/DEPLOY.md](./docs/DEPLOY.md).
+
 ## Быстрый старт
 
 ```bash

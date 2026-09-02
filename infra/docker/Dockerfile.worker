@@ -1,0 +1,23 @@
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS build
+
+WORKDIR /app
+
+COPY package.json package-lock.json nx.json tsconfig.base.json ./
+COPY apps/api ./apps/api
+COPY apps/worker ./apps/worker
+COPY libs ./libs
+
+RUN npm ci
+RUN npx nx build worker --configuration=production
+
+FROM mcr.microsoft.com/playwright:v1.62.1-noble
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json ./
+COPY --from=build /app/dist/apps/worker ./dist/apps/worker
+
+CMD ["node", "dist/apps/worker/main.js"]
