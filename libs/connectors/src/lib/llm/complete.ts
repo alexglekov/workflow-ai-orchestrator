@@ -15,8 +15,30 @@ export type LlmCompleteOptions = {
   json?: boolean;
 };
 
+const LLM_TIMEOUT_MS = 120_000;
+
 const textFromParts = (parts: Array<{ text?: string }> | undefined): string =>
   (parts ?? []).map((part) => part.text || '').join('').trim();
+
+const fetchLlm = async (url: string, init: RequestInit) => {
+  try {
+    return await fetch(url, {
+      ...init,
+      signal: init.signal ?? AbortSignal.timeout(LLM_TIMEOUT_MS),
+    });
+  } catch (err) {
+    if (
+      err instanceof Error &&
+      (err.name === 'TimeoutError' || err.name === 'AbortError')
+    ) {
+      throw new Error(
+        'Модель не ответила за 2 минуты. Повторите запрос или выберите другого агента.',
+      );
+    }
+
+    throw err;
+  }
+};
 
 export const describeGeminiError = (status: number, message?: string) => {
   const text = (message || '').trim();
@@ -60,7 +82,7 @@ const completeGemini = async (options: LlmCompleteOptions): Promise<string> => {
     throw new Error('Пустой запрос к модели');
   }
 
-  const response = await fetch(
+  const response = await fetchLlm(
     `${base}/models/${options.model}:generateContent?key=${encodeURIComponent(options.apiKey)}`,
     {
       method: 'POST',
@@ -100,7 +122,7 @@ const completeOpenAi = async (options: LlmCompleteOptions): Promise<string> => {
     /\/+$/,
     '',
   );
-  const response = await fetch(`${base}/chat/completions`, {
+  const response = await fetchLlm(`${base}/chat/completions`, {
     method: 'POST',
     headers: {
       Authorization: `Bearer ${options.apiKey}`,

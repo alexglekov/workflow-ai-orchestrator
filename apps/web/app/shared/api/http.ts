@@ -73,14 +73,27 @@ const apiRoot = () => {
 export const http = async <T>(path: string, init?: RequestInit): Promise<T> => {
   const { headers, ...rest } = init ?? {};
   const key = getApiKey();
-  const response = await fetch(`${apiRoot()}${path}`, {
-    ...rest,
-    headers: {
-      'Content-Type': 'application/json',
-      ...(key ? { 'X-Api-Key': key } : {}),
-      ...headerRecord(headers),
-    },
-  });
+  let response: Response;
+
+  try {
+    response = await fetch(`${apiRoot()}${path}`, {
+      ...rest,
+      headers: {
+        'Content-Type': 'application/json',
+        ...(key ? { 'X-Api-Key': key } : {}),
+        ...headerRecord(headers),
+      },
+    });
+  } catch (err) {
+    if (err instanceof TypeError) {
+      throw new Error(
+        'Не удалось связаться с API. Если запрос долгий — агент мог не успеть ответить, повторите или смените модель.',
+      );
+    }
+
+    throw err;
+  }
+
   const raw = await response.text();
 
   if (response.status === 401) {

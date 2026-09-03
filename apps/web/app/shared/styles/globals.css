@@ -1106,13 +1106,11 @@ select.agent-select:focus {
 }
 
 .ask-thread {
-  flex: 1;
-  min-height: 0;
-  overflow-y: auto;
   display: flex;
   flex-direction: column;
   gap: 10px;
   padding: 4px 4px 0;
+  overflow: visible;
 }
 
 .ask-bubble {
@@ -1756,11 +1754,15 @@ button.chevron:hover {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 1fr minmax(280px, 560px) 1fr;
   gap: 14px;
+  align-items: stretch;
 }
 
 .rail-panel {
+  justify-self: start;
+  width: 272px;
+  max-width: 100%;
   min-height: 0;
   overflow: auto;
   background: rgba(255, 255, 255, 0.86);
@@ -1936,16 +1938,21 @@ button.chevron:hover {
   flex-direction: column;
 }
 
-.editor-main .canvas-flow {
-  flex: 1;
-  overflow: auto;
-  padding: 12px 12px 188px;
-  display: flex;
-  justify-content: center;
+.editor-main.is-empty {
+  justify-content: flex-end;
 }
 
-.editor-main .pipeline {
-  width: min(100%, 440px);
+.editor-body > .canvas-flow {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 8px 4px 16px;
+  display: flex;
+  justify-content: flex-start;
+}
+
+.editor-body > .canvas-flow .pipeline {
+  width: min(100%, 400px);
 }
 
 .editor-hero {
@@ -1960,35 +1967,44 @@ button.chevron:hover {
   width: min(520px, 100%);
 }
 
-.editor-main.is-empty {
-  justify-content: center;
+.editor-main.is-empty:has(.ask-thread) .editor-hero {
+  display: none;
 }
 
 .composer-dock {
-  position: absolute;
-  left: 50%;
-  bottom: 10px;
-  transform: translateX(-50%);
-  width: min(560px, calc(100% - 28px));
+  position: relative;
+  width: 100%;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
+  margin: 0 0 8px;
   z-index: 4;
   display: flex;
   flex-direction: column;
+  justify-content: flex-end;
   gap: 10px;
-  max-height: min(52%, 440px);
+  overflow: auto;
+  scrollbar-width: none;
+}
+
+.composer-dock::-webkit-scrollbar {
+  display: none;
 }
 
 .editor-main.is-empty .composer-dock {
-  position: relative;
-  left: auto;
-  bottom: auto;
-  transform: none;
+  height: auto;
   width: min(560px, 100%);
-  margin: 0 auto;
-  max-height: none;
+  margin: 0 auto 8px;
 }
 
-.composer-dock .ask-thread {
-  max-height: 150px;
+.editor-main.is-empty:has(.ask-thread) .composer-dock {
+  flex: 1;
+}
+
+.composer-dock .prompt-shell {
+  flex-shrink: 0;
+  position: sticky;
+  bottom: 0;
 }
 
 .composer-dock .prompt-toolbar .row-actions {
@@ -2267,10 +2283,14 @@ button.chevron:hover {
 
   .editor-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(150px, 30%) minmax(0, 1fr);
+    grid-template-rows: minmax(150px, 30%) minmax(0, 1fr) auto;
   }
 
-  .editor-main .canvas-flow {
-    padding-bottom: 196px;
+  .rail-panel {
+    width: 100%;
+  }
+
+  .editor-body > .canvas-flow {
+    padding-bottom: 16px;
   }
 }

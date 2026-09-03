@@ -618,17 +618,7 @@ export const WorkflowEditorPage = () => {
                 </div>
               ) : null}
             </div>
-          ) : (
-            <section className="canvas-flow">
-              <StepsEditor
-                steps={workflow.steps}
-                catalog={catalog}
-                connections={connections}
-                onChange={updateStep}
-                onRemove={removeStep}
-              />
-            </section>
-          )}
+          ) : null}
           <div className="composer-dock">
             <AskThread
               messages={mode === 'ask' ? askMessages : buildMessages}
@@ -654,6 +644,17 @@ export const WorkflowEditorPage = () => {
             />
           </div>
         </div>
+        {empty ? null : (
+          <section className="canvas-flow">
+            <StepsEditor
+              steps={workflow.steps}
+              catalog={catalog}
+              connections={connections}
+              onChange={updateStep}
+              onRemove={removeStep}
+            />
+          </section>
+        )}
       </div>
       {pickerOpen ? (
         <NodePicker
