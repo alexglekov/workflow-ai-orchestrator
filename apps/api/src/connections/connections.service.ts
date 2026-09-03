@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { encryptJson } from '@ai-worker/data-access';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
@@ -22,12 +26,32 @@ export class ConnectionsService {
   private key = () => encryptionKey(this.config);
 
   list = async () => {
-    const key = this.key();
-    const rows = await this.connections.findAll();
+    try {
+      const rows = await this.connections.findAll();
 
-    return rows.map((row) =>
-      toPublicConnection(row, key, secretKeys(this.connectors, row.connectorId)),
-    );
+      if (!rows.length) {
+        return [];
+      }
+
+      const key = this.key();
+
+      return rows.map((row) =>
+        toPublicConnection(
+          row,
+          key,
+          secretKeys(this.connectors, row.connectorId),
+        ),
+      );
+    } catch (err) {
+      if (err instanceof InternalServerErrorException) {
+        throw err;
+      }
+
+      const message =
+        err instanceof Error ? err.message : 'Не удалось загрузить подключения';
+
+      throw new InternalServerErrorException(message);
+    }
   };
 
   create = async (dto: CreateConnectionDto) => {

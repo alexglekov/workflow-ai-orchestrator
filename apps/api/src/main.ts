@@ -2,6 +2,7 @@ import 'reflect-metadata';
 import { Logger, ValidationPipe } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
+import { resolveEncryptionKey } from './connections/lib/encryption-key';
 
 const corsOrigins = () => {
   const raw = process.env.CORS_ORIGIN?.trim();
@@ -48,6 +49,10 @@ const corsOrigins = () => {
 const bootstrap = async () => {
   if (process.env.NODE_ENV === 'production' && !process.env.API_PASSWORD?.trim()) {
     throw new Error('API_PASSWORD обязателен в production');
+  }
+
+  if (process.env.NODE_ENV === 'production') {
+    resolveEncryptionKey();
   }
 
   const app = await NestFactory.create(AppModule);
