@@ -1,3 +1,5 @@
+import type { WorkflowTrigger } from '../../trigger/model/types';
+
 export interface WorkflowStep {
   id: string;
   order: number;
@@ -14,6 +16,7 @@ export interface Workflow {
   name: string;
   prompt: string;
   steps: WorkflowStep[];
+  triggers?: WorkflowTrigger[];
   createdAt: string;
   updatedAt: string;
 }

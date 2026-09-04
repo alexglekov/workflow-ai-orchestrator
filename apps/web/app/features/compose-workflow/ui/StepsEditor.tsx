@@ -1,18 +1,41 @@
 import { useState, type CSSProperties } from 'react';
 import type { Connection } from '~/entities/connection';
 import type { ConnectorCatalog } from '~/entities/connector';
+import {
+  triggerKindLabel,
+  triggerLaunchLabel,
+  type WorkflowTrigger,
+} from '~/entities/trigger';
 import type { WorkflowStep } from '~/entities/workflow';
 import { connectorNeedsAccount, connectorVisual } from '~/shared/lib/connector-visuals';
 import { Icon } from '~/shared/ui/Icon';
 
+const triggerVisual = (type: string) => {
+  if (type === 'telegram') {
+    return { bg: '#e3f2fd', color: '#1565c0', icon: 'send' as const };
+  }
+
+  if (type === 'mail') {
+    return { bg: '#fde8e8', color: '#c62828', icon: 'target' as const };
+  }
+
+  if (type === 'webhook') {
+    return { bg: '#ede7f6', color: '#5e35b1', icon: 'link' as const };
+  }
+
+  return { bg: '#e8f5e9', color: '#2e7d32', icon: 'clock' as const };
+};
+
 export const StepsEditor = ({
   steps,
+  triggers = [],
   catalog,
   connections,
   onChange,
   onRemove,
 }: {
   steps: WorkflowStep[];
+  triggers?: WorkflowTrigger[];
   catalog: ConnectorCatalog[];
   connections: Connection[];
   onChange: (index: number, patch: Partial<WorkflowStep>) => void;
@@ -20,12 +43,51 @@ export const StepsEditor = ({
 }) => {
   const [open, setOpen] = useState<number | null>(null);
 
-  if (steps.length === 0) {
+  if (steps.length === 0 && triggers.length === 0) {
     return null;
   }
 
   return (
     <div className="pipeline">
+      {triggers.map((trigger, index) => {
+        const visual = triggerVisual(trigger.type);
+        const last = steps.length === 0 && index === triggers.length - 1;
+
+        return (
+          <div className="pipeline-step is-trigger" key={trigger.id}>
+            <div className="pipeline-axis">
+              <span
+                className="pipeline-node"
+                style={
+                  {
+                    background: visual.bg,
+                    color: visual.color,
+                    '--node-accent': visual.color,
+                  } as CSSProperties
+                }
+              >
+                <Icon name={visual.icon} size={15} />
+              </span>
+              {last ? null : <span className="pipeline-wire" />}
+            </div>
+            <div className="pipeline-body">
+              <div className="pipeline-chip">
+                <div className="pipeline-main">
+                  <strong>Старт · {triggerKindLabel(trigger.type)}</strong>
+                  <span>
+                    {trigger.enabled
+                      ? triggerLaunchLabel(trigger)
+                      : 'выключен'}
+                  </span>
+                </div>
+                {trigger.enabled ? null : (
+                  <span className="chip">пауза</span>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })}
       {steps.map((step, index) => {
         const connector = catalog.find((item) => item.id === step.connectorId);
         const actions = connector?.actions ?? [];

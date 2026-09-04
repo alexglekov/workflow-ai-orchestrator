@@ -7,6 +7,7 @@ import {
   ParseWorkflowDto,
   UpdateWorkflowDto,
 } from './dto';
+import { WorkflowChatRepository, type ChatThread } from './persistence/workflow-chat.repository';
 import { WorkflowStepInput } from './persistence/workflow-step.input';
 import { WorkflowsRepository } from './persistence/workflows.repository';
 
@@ -16,6 +17,7 @@ const DEMO_PROMPT = STARTER_PROMPT;
 export class WorkflowsService {
   constructor(
     private readonly workflows: WorkflowsRepository,
+    private readonly chat: WorkflowChatRepository,
     private readonly connectors: ConnectorRegistryService,
     private readonly connections: ConnectionsService,
   ) {}
@@ -59,6 +61,50 @@ export class WorkflowsService {
   };
 
   clear = () => this.workflows.deleteAll();
+
+  listChat = async (
+    id: string,
+    query: { thread?: ChatThread; before?: string; limit?: number } = {},
+  ) => {
+    await this.get(id);
+
+    if (query.thread) {
+      return this.chat.page(id, query.thread, {
+        before: query.before,
+        limit: query.limit,
+      });
+    }
+
+    const [ask, build] = await Promise.all([
+      this.chat.page(id, 'ask', { limit: query.limit }),
+      this.chat.page(id, 'build', { limit: query.limit }),
+    ]);
+
+    return { ask, build };
+  };
+
+  listChatThread = async (id: string, thread: ChatThread) => {
+    await this.get(id);
+
+    const rows = await this.chat.listThread(id, thread);
+
+    return rows
+      .filter((row) => row.status !== 'error')
+      .map((row) => ({
+        role: row.role as 'user' | 'assistant',
+        content: row.content,
+      }));
+  };
+
+  appendChat = (
+    id: string,
+    thread: ChatThread,
+    items: Array<{
+      role: 'user' | 'assistant';
+      content: string;
+      status?: 'error';
+    }>,
+  ) => this.chat.append(id, thread, items);
 
   parse = async (id: string, dto: ParseWorkflowDto) => {
     await this.get(id);

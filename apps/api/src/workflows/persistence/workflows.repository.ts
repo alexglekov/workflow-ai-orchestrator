@@ -5,6 +5,7 @@ import { WorkflowStepInput } from './workflow-step.input';
 
 const stepsInclude = {
   steps: { orderBy: { order: 'asc' as const } },
+  triggers: { orderBy: { createdAt: 'asc' as const } },
 };
 
 const toStepCreates = (steps: WorkflowStepInput[]) =>

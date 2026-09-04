@@ -19,9 +19,20 @@ export interface AgentCatalog {
 }
 
 export interface AgentMessage {
+  id?: string;
   role: 'user' | 'assistant';
   content: string;
   status?: 'error';
+}
+
+export interface ChatPage {
+  messages: AgentMessage[];
+  hasMore: boolean;
+}
+
+export interface WorkflowChat {
+  ask: ChatPage;
+  build: ChatPage;
 }
 
 export interface AgentReply {

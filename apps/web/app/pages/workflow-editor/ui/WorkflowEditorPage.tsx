@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useAtom } from 'jotai';
 import {
   askAgent,
   fetchAgents,
+  fetchWorkflowChat,
+  fetchWorkflowChatPage,
   planAgent,
   type AgentMessage,
   type AgentProviderInfo,
@@ -63,13 +65,17 @@ export const WorkflowEditorPage = () => {
   const [mode, setMode] = useState<ComposerMode>('build');
   const [askDraft, setAskDraft] = useState('');
   const [askMessages, setAskMessages] = useState<AgentMessage[]>([]);
+  const [askHasMore, setAskHasMore] = useState(false);
+  const [askLoadingMore, setAskLoadingMore] = useState(false);
   const [asking, setAsking] = useState(false);
   const [planDraft, setPlanDraft] = useState('');
   const [buildMessages, setBuildMessages] = useState<AgentMessage[]>([]);
+  const [buildHasMore, setBuildHasMore] = useState(false);
+  const [buildLoadingMore, setBuildLoadingMore] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
   const [providerId, setProviderId] = useState('gemini');
-  const persistTimer = useRef<ReturnType<typeof setTimeout>>();
+  const persistTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const persistGen = useRef(0);
   const nameRef = useRef(name);
   const promptRef = useRef(prompt);
@@ -95,7 +101,7 @@ export const WorkflowEditorPage = () => {
       setWorkflow(null);
 
       try {
-        const [nextWorkflow, nextCatalog, nextConnections, nextAgents] =
+        const [nextWorkflow, nextCatalog, nextConnections, nextAgents, nextChat] =
           await Promise.all([
             fetchWorkflow(id),
             fetchCatalog(),
@@ -103,6 +109,10 @@ export const WorkflowEditorPage = () => {
             fetchAgents().catch(() => ({
               active: 'gemini',
               providers: [],
+            })),
+            fetchWorkflowChat(id).catch(() => ({
+              ask: { messages: [], hasMore: false },
+              build: { messages: [], hasMore: false },
             })),
           ]);
 
@@ -116,9 +126,13 @@ export const WorkflowEditorPage = () => {
         setTriggers(await fetchTriggers(id).catch(() => []));
         setMode('build');
         setAskDraft('');
-        setAskMessages([]);
+        setAskMessages(nextChat.ask.messages);
+        setAskHasMore(nextChat.ask.hasMore);
+        setAskLoadingMore(false);
         setPlanDraft('');
-        setBuildMessages([]);
+        setBuildMessages(nextChat.build.messages);
+        setBuildHasMore(nextChat.build.hasMore);
+        setBuildLoadingMore(false);
         setError(null);
       } catch (err) {
         setError(
@@ -127,6 +141,69 @@ export const WorkflowEditorPage = () => {
       }
     })();
   }, [id, setCatalog, setConnections, setError, setWorkflow]);
+
+  const loadOlderChat = useCallback(async () => {
+    if (!id) {
+      return;
+    }
+
+    const thread = mode === 'ask' ? 'ask' : 'build';
+    const loading = thread === 'ask' ? askLoadingMore : buildLoadingMore;
+    const more = thread === 'ask' ? askHasMore : buildHasMore;
+    const list = thread === 'ask' ? askMessages : buildMessages;
+    const before = list.find((item) => item.id)?.id;
+
+    if (loading || !more || !before) {
+      return;
+    }
+
+    if (thread === 'ask') {
+      setAskLoadingMore(true);
+    } else {
+      setBuildLoadingMore(true);
+    }
+
+    try {
+      const page = await fetchWorkflowChatPage(id, thread, before);
+      const merge = (current: AgentMessage[]) => {
+        const seen = new Set(current.map((item) => item.id).filter(Boolean));
+
+        return [
+          ...page.messages.filter((item) => !item.id || !seen.has(item.id)),
+          ...current,
+        ];
+      };
+
+      if (thread === 'ask') {
+        setAskMessages(merge);
+        setAskHasMore(page.hasMore);
+      } else {
+        setBuildMessages(merge);
+        setBuildHasMore(page.hasMore);
+      }
+    } catch {
+      if (thread === 'ask') {
+        setAskHasMore(false);
+      } else {
+        setBuildHasMore(false);
+      }
+    } finally {
+      if (thread === 'ask') {
+        setAskLoadingMore(false);
+      } else {
+        setBuildLoadingMore(false);
+      }
+    }
+  }, [
+    id,
+    mode,
+    askLoadingMore,
+    buildLoadingMore,
+    askHasMore,
+    buildHasMore,
+    askMessages,
+    buildMessages,
+  ]);
 
   if (!workflow) {
     return (
@@ -506,6 +583,7 @@ export const WorkflowEditorPage = () => {
   };
 
   const empty = workflow.steps.length === 0;
+  const showFlow = !empty || triggers.length > 0;
   const buildFollowUp = buildMessages.length > 0;
   const composerBusy = mode === 'ask' ? asking : planning;
   const composerValue =
@@ -602,7 +680,7 @@ export const WorkflowEditorPage = () => {
           }
         />
         <div className={`editor-main${empty ? ' is-empty' : ''}`}>
-          {empty ? (
+          {empty && triggers.length === 0 ? (
             <div className="editor-hero">
               {mode === 'build' && !buildFollowUp ? (
                 <div className="start-tiles">
@@ -634,6 +712,9 @@ export const WorkflowEditorPage = () => {
             <AskThread
               messages={mode === 'ask' ? askMessages : buildMessages}
               loading={mode === 'ask' ? asking : planning}
+              hasMore={mode === 'ask' ? askHasMore : buildHasMore}
+              loadingMore={mode === 'ask' ? askLoadingMore : buildLoadingMore}
+              onLoadOlder={loadOlderChat}
             />
             <PromptForm
               mode={mode}
@@ -655,17 +736,18 @@ export const WorkflowEditorPage = () => {
             />
           </div>
         </div>
-        {empty ? null : (
+        {showFlow ? (
           <section className="canvas-flow">
             <StepsEditor
               steps={workflow.steps}
+              triggers={triggers}
               catalog={catalog}
               connections={connections}
               onChange={updateStep}
               onRemove={removeStep}
             />
           </section>
-        )}
+        ) : null}
       </div>
       {pickerOpen ? (
         <NodePicker

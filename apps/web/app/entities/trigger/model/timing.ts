@@ -60,6 +60,37 @@ export const triggerMinutes = (
     : defaultMinutesFor(trigger.type);
 };
 
+export const triggerKindLabel = (type: string) => {
+  if (type === 'webhook') {
+    return 'Webhook';
+  }
+
+  if (type === 'mail') {
+    return 'Почта';
+  }
+
+  if (type === 'telegram') {
+    return 'Telegram';
+  }
+
+  return 'Расписание';
+};
+
+export const triggerLaunchLabel = (trigger: {
+  type: string;
+  config: Record<string, unknown>;
+}) => {
+  if (trigger.type === 'webhook') {
+    return 'HTTP POST';
+  }
+
+  return timingLabel(
+    triggerMinutes(trigger),
+    triggerAt(trigger),
+    triggerTimezone(trigger),
+  );
+};
+
 export const timingLabel = (
   everyMinutes: number,
   at?: string,

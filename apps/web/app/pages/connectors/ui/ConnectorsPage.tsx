@@ -38,25 +38,25 @@ export const ConnectorsPage = () => {
         <h1 className="list-title">Коннекторы</h1>
         {error ? <Banner>{error}</Banner> : null}
         <div className="card-grid">
-            {catalog.map((connector) => (
-              <ConnectorCard
-                key={connector.id}
-                connector={connector}
-                connections={connections.filter(
-                  (item) => item.connectorId === connector.id,
-                )}
-                expanded={activeId === connector.id}
-                busy={busyId === connector.id}
-                onToggle={() =>
-                  setActiveId((current) =>
-                    current === connector.id ? null : connector.id,
-                  )
-                }
-                onBusy={(value) => setBusyId(value ? connector.id : null)}
-                onRefresh={reload}
-              />
-            ))}
-          </div>
+          {catalog.map((connector) => (
+            <ConnectorCard
+              key={connector.id}
+              connector={connector}
+              connections={connections.filter(
+                (item) => item.connectorId === connector.id,
+              )}
+              expanded={activeId === connector.id}
+              busy={busyId === connector.id}
+              onToggle={() =>
+                setActiveId((current) =>
+                  current === connector.id ? null : connector.id,
+                )
+              }
+              onBusy={(value) => setBusyId(value ? connector.id : null)}
+              onRefresh={reload}
+            />
+          ))}
+        </div>
       </div>
     </div>
   );

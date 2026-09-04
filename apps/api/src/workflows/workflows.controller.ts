@@ -7,6 +7,7 @@ import {
   Param,
   Patch,
   Post,
+  Query,
 } from '@nestjs/common';
 import {
   CreateWorkflowDto,
@@ -38,6 +39,24 @@ export class WorkflowsController {
   @HttpCode(204)
   clear() {
     return this.workflows.clear();
+  }
+
+  @Get(':id/chat')
+  chat(
+    @Param('id') id: string,
+    @Query('thread') thread?: string,
+    @Query('before') before?: string,
+    @Query('limit') limit?: string,
+  ) {
+    const parsed =
+      thread === 'ask' || thread === 'build' ? thread : undefined;
+    const take = Number(limit);
+
+    return this.workflows.listChat(id, {
+      thread: parsed,
+      before: before?.trim() || undefined,
+      limit: Number.isFinite(take) ? take : undefined,
+    });
   }
 
   @Get(':id')

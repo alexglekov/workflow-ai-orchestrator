@@ -8,6 +8,8 @@ export {
   triggerMinutes,
   triggerTimezone,
   timingLabel,
+  triggerKindLabel,
+  triggerLaunchLabel,
 } from './model/timing';
 export {
   fetchTriggers,

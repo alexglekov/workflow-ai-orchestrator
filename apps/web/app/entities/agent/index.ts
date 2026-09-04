@@ -7,5 +7,14 @@ export type {
   AgentProviderInfo,
   AgentReply,
   ComposerMode,
+  WorkflowChat,
+  ChatPage,
 } from './model/types';
-export { fetchAgents, askAgent, planAgent, toAgentHistory } from './api/agents';
+export {
+  fetchAgents,
+  fetchWorkflowChat,
+  fetchWorkflowChatPage,
+  askAgent,
+  planAgent,
+  toAgentHistory,
+} from './api/agents';

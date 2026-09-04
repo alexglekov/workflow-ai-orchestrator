@@ -37,13 +37,42 @@ export class AgentsService {
     try {
       const provider = this.resolve(dto.providerId);
       const context = await this.context(dto.workflowId);
+      const history = dto.workflowId
+        ? await this.workflows.listChatThread(dto.workflowId, 'ask')
+        : dto.history;
+      const message = dto.message.trim();
 
-      return await provider.ask({
-        message: dto.message.trim(),
-        history: dto.history,
-        context,
-        providerId: dto.providerId,
-      });
+      try {
+        const reply = await provider.ask({
+          message,
+          history,
+          context,
+          providerId: dto.providerId,
+        });
+
+        if (dto.workflowId) {
+          await this.workflows.appendChat(dto.workflowId, 'ask', [
+            { role: 'user', content: message },
+            { role: 'assistant', content: reply.message },
+          ]);
+        }
+
+        return reply;
+      } catch (err) {
+        if (dto.workflowId) {
+          await this.workflows.appendChat(dto.workflowId, 'ask', [
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content:
+                err instanceof Error ? err.message : 'Не удалось спросить агента',
+              status: 'error',
+            },
+          ]);
+        }
+
+        throw err;
+      }
     } catch (err) {
       throw toHttpError(err);
     }
@@ -62,40 +91,69 @@ export class AgentsService {
 
       const prompt = dto.prompt.trim();
       const message = (dto.message || dto.prompt).trim();
-      const planned = sanitizePlan(
-        await provider.plan({
-          prompt,
-          message,
-          history: dto.history,
+      const history = dto.workflowId
+        ? await this.workflows.listChatThread(dto.workflowId, 'build')
+        : dto.history;
+
+      try {
+        const planned = sanitizePlan(
+          await provider.plan({
+            prompt,
+            message,
+            history,
+            context,
+            providerId: dto.providerId,
+          }),
           context,
-          providerId: dto.providerId,
-        }),
-        context,
-      );
-      const result = {
-        ...planned,
-        message: toAssistantMessage(planned),
-      };
+        );
+        const result = {
+          ...planned,
+          message: toAssistantMessage(planned),
+        };
 
-      if (dto.workflowId && result.kind === 'questions') {
-        await this.workflows.update(dto.workflowId, { prompt });
+        if (dto.workflowId) {
+          await this.workflows.appendChat(dto.workflowId, 'build', [
+            { role: 'user', content: message },
+            { role: 'assistant', content: result.message },
+          ]);
+        }
+
+        if (dto.workflowId && result.kind === 'questions') {
+          await this.workflows.update(dto.workflowId, { prompt });
+        }
+
+        if (dto.workflowId && result.kind === 'workflow') {
+          const current = await this.workflows.get(dto.workflowId);
+          const shouldRename =
+            Boolean(result.name) &&
+            (!current.name || current.name === 'Новый workflow');
+          const workflow = await this.workflows.update(dto.workflowId, {
+            prompt,
+            name: shouldRename ? result.name : undefined,
+            steps: result.steps,
+          });
+
+          return { ...result, workflow };
+        }
+
+        return result;
+      } catch (err) {
+        if (dto.workflowId) {
+          await this.workflows.appendChat(dto.workflowId, 'build', [
+            { role: 'user', content: message },
+            {
+              role: 'assistant',
+              content:
+                err instanceof Error
+                  ? err.message
+                  : 'Не удалось составить workflow',
+              status: 'error',
+            },
+          ]);
+        }
+
+        throw err;
       }
-
-      if (dto.workflowId && result.kind === 'workflow') {
-        const current = await this.workflows.get(dto.workflowId);
-        const shouldRename =
-          Boolean(result.name) &&
-          (!current.name || current.name === 'Новый workflow');
-        const workflow = await this.workflows.update(dto.workflowId, {
-          prompt,
-          name: shouldRename ? result.name : undefined,
-          steps: result.steps,
-        });
-
-        return { ...result, workflow };
-      }
-
-      return result;
     } catch (err) {
       throw toHttpError(err);
     }

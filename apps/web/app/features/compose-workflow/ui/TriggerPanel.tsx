@@ -45,57 +45,62 @@ export const TriggerPanel = ({
   <aside className="rail-panel">
     <div className="rail-head">
       <h2>Триггеры</h2>
-      <p>Запуск по событию, без кнопки</p>
+      <p>Запуск по событию, без кнопки Run</p>
     </div>
     {triggers.length === 0 ? (
-      <p className="rail-empty">Пока только ручной запуск</p>
+      <p className="rail-empty">
+        Сейчас только ручной запуск. Добавьте триггер — пайплайн появится на
+        главной в списке постоянных.
+      </p>
     ) : (
       <ul className="trigger-list">
         {triggers.map((trigger) => (
           <li key={trigger.id} className="trigger-card">
-            <span className="trigger-icon" aria-hidden>
-              <Icon
-                name={
-                  trigger.type === 'webhook'
-                    ? 'link'
-                    : trigger.type === 'mail'
-                      ? 'target'
-                      : trigger.type === 'telegram'
-                        ? 'send'
-                        : 'clock'
-                }
-                size={15}
-              />
-            </span>
-            <div className="trigger-copy">
-              <strong>{label(trigger.type)}</strong>
-              <span>
-                {trigger.type === 'webhook'
-                  ? 'HTTP POST'
-                  : trigger.type === 'telegram' && trigger.webhookUrl
-                    ? 'Webhook бота / опрос'
-                    : timingLabel(
-                        triggerMinutes(trigger),
-                        triggerAt(trigger),
-                        triggerTimezone(trigger),
-                      )}
+            <div className="trigger-card-head">
+              <span className="trigger-icon" aria-hidden>
+                <Icon
+                  name={
+                    trigger.type === 'webhook'
+                      ? 'link'
+                      : trigger.type === 'mail'
+                        ? 'target'
+                        : trigger.type === 'telegram'
+                          ? 'send'
+                          : 'clock'
+                  }
+                  size={15}
+                />
               </span>
+              <div className="trigger-copy">
+                <strong>{label(trigger.type)}</strong>
+                <span>
+                  {trigger.type === 'webhook'
+                    ? 'HTTP POST'
+                    : trigger.type === 'telegram' && trigger.webhookUrl
+                      ? 'Webhook бота / опрос'
+                      : timingLabel(
+                          triggerMinutes(trigger),
+                          triggerAt(trigger),
+                          triggerTimezone(trigger),
+                        )}
+                </span>
+              </div>
+              <button
+                type="button"
+                className={`switch${trigger.enabled ? ' on' : ''}`}
+                aria-label={trigger.enabled ? 'Выключить' : 'Включить'}
+                aria-pressed={trigger.enabled}
+                onClick={() => onToggle(trigger.id, !trigger.enabled)}
+              />
+              <button
+                type="button"
+                className="icon-quiet"
+                aria-label="Удалить триггер"
+                onClick={() => onRemove(trigger.id)}
+              >
+                <Icon name="trash" size={14} />
+              </button>
             </div>
-            <button
-              type="button"
-              className={`switch${trigger.enabled ? ' on' : ''}`}
-              aria-label={trigger.enabled ? 'Выключить' : 'Включить'}
-              aria-pressed={trigger.enabled}
-              onClick={() => onToggle(trigger.id, !trigger.enabled)}
-            />
-            <button
-              type="button"
-              className="icon-quiet"
-              aria-label="Удалить триггер"
-              onClick={() => onRemove(trigger.id)}
-            >
-              <Icon name="trash" size={14} />
-            </button>
             {trigger.webhookUrl &&
             (trigger.type === 'webhook' || trigger.type === 'telegram') ? (
               <code className="trigger-url">{trigger.webhookUrl}</code>

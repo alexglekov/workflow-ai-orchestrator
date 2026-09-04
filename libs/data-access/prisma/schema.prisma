@@ -26,6 +26,7 @@ model Workflow {
   runs      Run[]
   triggers  Trigger[]
   state     WorkflowState[]
+  chat      WorkflowChatMessage[]
   createdAt DateTime        @default(now())
   updatedAt DateTime        @updatedAt
 }
@@ -110,4 +111,17 @@ model WorkflowState {
 
   @@unique([workflowId, key])
   @@index([workflowId])
+}
+
+model WorkflowChatMessage {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  thread     String
+  role       String
+  content    String
+  status     String?
+  createdAt  DateTime @default(now())
+
+  @@index([workflowId, thread, createdAt])
 }
