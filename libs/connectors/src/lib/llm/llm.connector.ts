@@ -80,14 +80,91 @@ const sourceText = (
   return stringifyResult(previous);
 };
 
+const GENERATE_SYSTEM = [
+  'Ты пишешь готовый текст, который сразу уйдёт пользователю (Telegram, почта, отчёт).',
+  'Верни только этот текст: без преамбулы, без кавычек вокруг всего ответа, без markdown-ограждений.',
+  'Запрещено: код, функции, скрипты, JSON, инструкции для n8n/Make/Pipedream, комментарии //, блоки ```.',
+  'Если в контексте есть числа — подставь их в текст. Не описывай, как посчитать, а посчитай сам.',
+].join(' ');
+
+const unwrapFences = (value: string): string => {
+  const trimmed = value.trim();
+  const fenced = /^```[a-zA-Z0-9_-]*\s*\n?([\s\S]*?)\n?```$/m.exec(trimmed);
+
+  if (fenced) {
+    return fenced[1].trim();
+  }
+
+  return trimmed
+    .replace(/^```[a-zA-Z0-9_-]*\s*\n?/, '')
+    .replace(/\n?```$/, '')
+    .trim();
+};
+
+const looksLikeCode = (value: string): boolean => {
+  const body = unwrapFences(value);
+  const signals = [
+    /(?:^|\n)\s*(?:const|let|var|function|class|import|export|return)\b/,
+    /\/\/\s*Код для интеграции/i,
+    /\bn8n\b|\bPipedream\b|\bMake\b/,
+    /\bparseFloat\s*\(/,
+    /\bmodule\.exports\b/,
+  ];
+
+  return signals.filter((pattern) => pattern.test(body)).length >= 2;
+};
+
+const generatePlainText = async (
+  llm: ReturnType<typeof resolveLlm>,
+  instruction: string,
+  context: string,
+  signal?: AbortSignal,
+): Promise<string> => {
+  const ask = (extra?: string) =>
+    completeLlm({
+      ...llm,
+      timeoutMs: 45_000,
+      signal,
+      messages: [
+        { role: 'system', content: GENERATE_SYSTEM },
+        {
+          role: 'user',
+          content: [
+            instruction,
+            extra,
+            `Контекст:\n${context.slice(0, 24_000)}`,
+          ]
+            .filter(Boolean)
+            .join('\n\n'),
+        },
+      ],
+      temperature: extra ? 0.2 : 0.4,
+    });
+
+  let generated = unwrapFences(await ask());
+
+  if (looksLikeCode(generated)) {
+    generated = unwrapFences(
+      await ask(
+        'Предыдущий ответ был кодом. Сейчас напиши только готовое сообщение человеку, с уже подставленными числами и эмодзи, без кода.',
+      ),
+    );
+  }
+
+  return generated;
+};
+
 const runJson = async (
   credentials: Record<string, string>,
   system: string,
   prompt: string,
+  signal?: AbortSignal,
 ): Promise<Record<string, unknown>> => {
   const llm = resolveLlm(credentials);
   const text = await completeLlm({
     ...llm,
+    timeoutMs: 45_000,
+    signal,
     messages: [
       { role: 'system', content: system },
       { role: 'user', content: prompt },
@@ -103,7 +180,7 @@ export const llmConnector: Connector = {
   id: 'llm',
   name: 'LLM',
   description:
-    'Извлечение полей, классификация и генерация текста во время запуска. Ключ из подключения или GEMINI_API_KEY / OPENAI_API_KEY',
+    'Извлечение полей, классификация и генерация текста во время запуска. Ключ из подключения или GEMINI_API_KEY / QWEN_API_KEY',
   credentialFields: [
     {
       key: 'provider',
@@ -111,7 +188,7 @@ export const llmConnector: Connector = {
       type: 'select',
       options: [
         { value: 'gemini', label: 'Gemini' },
-        { value: 'openai', label: 'OpenAI' },
+        { value: 'qwen', label: 'Qwen' },
       ],
     },
     {
@@ -123,7 +200,7 @@ export const llmConnector: Connector = {
     {
       key: 'model',
       label: 'Модель (необязательно)',
-      placeholder: 'gemini-3.6-flash или gpt-4o-mini',
+      placeholder: 'gemini-3.6-flash или qwen-plus',
     },
   ],
   actions: [
@@ -165,7 +242,8 @@ export const llmConnector: Connector = {
     {
       id: 'generate',
       name: 'Сгенерировать текст',
-      description: 'Пишет текст по инструкции и контексту предыдущего шага',
+      description:
+        'Пишет готовый текст для человека (Telegram, письмо). Не код и не JSON',
       paramsSchema: {
         instruction: {
           type: 'string',
@@ -181,7 +259,7 @@ export const llmConnector: Connector = {
     {
       id: 'transcribe',
       name: 'Распознать речь',
-      description: 'Аудио (base64 с предыдущего шага) → текст. Gemini inline или Whisper',
+      description: 'Аудио (base64 с предыдущего шага) → текст. Gemini inline или Qwen ASR',
       paramsSchema: {
         audioBase64: { type: 'string', description: 'Если нет — previous.audioBase64' },
       },
@@ -189,10 +267,10 @@ export const llmConnector: Connector = {
     {
       id: 'speak',
       name: 'Озвучить текст',
-      description: 'TTS через OpenAI. Нужен OPENAI_API_KEY. Результат: audioBase64',
+      description: 'TTS через Qwen. Нужен QWEN_API_KEY. Результат: audioBase64',
       paramsSchema: {
         text: { type: 'string', description: 'Текст. Иначе previous.text' },
-        voice: { type: 'string', description: 'alloy | echo | fable | onyx | nova | shimmer' },
+        voice: { type: 'string', description: 'Голос Qwen: Cherry | Ethan | Jennifer | Ryan | Katerina' },
       },
     },
   ],
@@ -203,7 +281,7 @@ export const llmConnector: Connector = {
       if (!llm.apiKey) {
         return {
           ok: false,
-          error: 'Задайте API-ключ в подключении или в GEMINI_API_KEY / OPENAI_API_KEY',
+          error: 'Задайте API-ключ в подключении или в GEMINI_API_KEY / QWEN_API_KEY',
         };
       }
 
@@ -264,6 +342,7 @@ export const llmConnector: Connector = {
             .filter(Boolean)
             .join(' '),
           `Схема полей:\n${JSON.stringify(schema, null, 2)}\n\nТекст:\n${text.slice(0, 24_000)}`,
+          input.signal,
         );
 
         return { ok: true, data };
@@ -293,6 +372,7 @@ export const llmConnector: Connector = {
             .filter(Boolean)
             .join(' '),
           text.slice(0, 24_000),
+          input.signal,
         );
         const label = String(data['label'] || '').trim();
 
@@ -315,21 +395,12 @@ export const llmConnector: Connector = {
 
         const text = sourceText(params, input.previousResult);
         const llm = resolveLlm(input.credentials);
-        const generated = await completeLlm({
-          ...llm,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Ты пишешь рабочий текст для workflow. Без преамбулы, только результат.',
-            },
-            {
-              role: 'user',
-              content: `${instruction}\n\nКонтекст:\n${text.slice(0, 24_000)}`,
-            },
-          ],
-          temperature: 0.4,
-        });
+        const generated = await generatePlainText(
+          llm,
+          instruction,
+          text,
+          input.signal,
+        );
 
         return { ok: true, data: { text: generated } };
       }

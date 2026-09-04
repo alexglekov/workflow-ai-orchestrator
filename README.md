@@ -24,6 +24,7 @@ cp .env.example .env
 npm run db:up
 npm run db:migrate
 npx playwright install chromium
+brew install ffmpeg   # только для голосовых Telegram
 npx nx serve api
 npx nx serve worker
 npx nx serve web
@@ -80,7 +81,7 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 - `telegram.send_message` — текст, `chatId` можно `{{item.chatId}}`
 - `telegram.send_voice` — `fileId`, аудио с предыдущего шага или TTS из `text`. `memoryKey` запоминает `file_id`: тот же вопрос снова — то же голосовое.
 
-Триггер **Telegram**: при `PUBLIC_API_URL` с https бот регистрирует webhook; иначе опрос раз в минуту. Озвучка TTS — `OPENAI_API_KEY`.
+Триггер **Telegram**: при `PUBLIC_API_URL` с https бот регистрирует webhook; иначе опрос раз в минуту. Озвучка TTS — `QWEN_API_KEY`.
 
 ### Memory
 
@@ -120,12 +121,16 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 
 ### LLM (извлечение и текст)
 
-Работает во время запуска workflow, не только при сборке шагов. Ключ — из карточки коннектора или из `GEMINI_API_KEY` / `OPENAI_API_KEY`.
+Работает во время запуска workflow, не только при сборке шагов. Ключ — из карточки коннектора или из `GEMINI_API_KEY` / `QWEN_API_KEY`.
 
 - `llm.extract` — текст/страница + JSON-схема → поля (`{"btcRub": number, ...}`)
 - `llm.classify` — одна метка из списка и короткое `reason`
 - `llm.generate` — написать текст по инструкции
-- `llm.transcribe` / `llm.speak` — речь ↔ текст (speak через OpenAI TTS)
+- `llm.transcribe` / `llm.speak` — речь ↔ текст (speak через Qwen TTS, распознавание — Gemini или Qwen ASR)
+
+Агентов два: **Gemini** (`GEMINI_API_KEY`) и **Qwen** (`QWEN_API_KEY` из Alibaba Model Studio). Ключ Qwen привязан к региону, поэтому `QWEN_BASE_URL` должен быть из того же региона. Режим «Авто» берёт первого доступного; если ключей нет ни у одного, запрос падает с явной ошибкой.
+
+Qwen TTS отдаёт WAV, а Telegram принимает голосовые только в OGG/Opus, поэтому нужен **ffmpeg**: в Docker он в образе, локально — `brew install ffmpeg`. Без него озвучка уйдёт обычным аудиофайлом, а не голосовым.
 
 ### Transform
 
@@ -144,7 +149,9 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 - `web.fetch` — скачать URL и вернуть текст и таблицы (`full: true` — вместе с меню и подвалом)
 - `web.rates` — BTC/LTC/USDT → RUB из `api.bestchange.ru/info.zip` (поля `btcRub`, `ltcRub`, `usdtRub` и готовый `text`)
 
-**Ключ для поиска обязателен на сервере.** С IP дата-центра DuckDuckGo и Mojeek отдают анти-бот заглушку. Порядок провайдеров: Brave → Google CSE → Serper → Tavily → DuckDuckGo → Mojeek → Chromium → Wikipedia. Первый ответивший выигрывает, остальные остаются резервом. Ключи — в карточке коннектора или в `.env`: `BRAVE_API_KEY` (2000 запросов/мес бесплатно), `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX`, `SERPER_API_KEY`, `TAVILY_API_KEY`.
+**Порядок источников:** сначала ключи (`BRAVE_API_KEY`, `GOOGLE_SEARCH_API_KEY` + `cx`, `SERPER_API_KEY`, `TAVILY_API_KEY`), затем выбранная модель — Gemini (встроенный Google Search) или Qwen (`enable_search`) по ключу из `GEMINI_API_KEY` / `QWEN_API_KEY`, затем бесплатные: DuckDuckGo Lite, Bing, Chromium, Brave, DuckDuckGo HTML, Mojeek и Wikipedia в самом конце. Ключи не обязательны, но с серверного IP бесплатные источники чаще режет анти-бот. Отключить поиск модели: в коннекторе Web `allowLlmSearch=false` или `provider: duckduckgo-lite`.
+
+Выдача каждого источника сверяется с запросом: Bing и Brave умеют отвечать `200 OK` с результатами по чужому запросу, такой ответ считается отказом и поиск идёт дальше. Одинаковые запросы кэшируются на 5 минут, чтобы не упираться в лимиты.
 
 `web.search` возвращает `results[]` (`title`, `url`, `host`, `snippet`, `score`, `text`), `attempts[]` с причиной отказа каждого провайдера и готовый `text` для `llm.extract`. Выдача дедуплицируется, реклама и трекинг-параметры отбрасываются, один домен не занимает больше двух мест. По умолчанию догружается текст первых трёх страниц — `fetchContent: false` отключает. Если сработал только резерв, в ответе будет `degraded: true` и `warning`.
 
@@ -157,7 +164,7 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 Страницы, где нужен JavaScript (SPA, часть P2P). Не замена Social и не парк аккаунтов.
 
 - `browser.open` — `url`, опционально `waitFor` (селектор), `waitUntil`, `actions` (`click` / `fill` / `press` / `wait`), `timeoutMs`
-- Chromium: `npx playwright install chromium`. Процесс **worker**, не API.
+- Chromium: локально `npx playwright install chromium`, в Docker уже лежит в образе. `browser.open` выполняет **worker**, но Chromium есть и в API — им пользуется проверка подключения Web.
 - Cookies: поле `storageState` в подключении (JSON Playwright). Частные URL — `allowPrivate=true`.
 
 ### Social (VK / Instagram / LinkedIn)

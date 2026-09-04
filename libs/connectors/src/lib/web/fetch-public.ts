@@ -7,6 +7,8 @@ export type PublicResponse = {
   status: number;
   contentType: string;
   body: string;
+  /** Готовое значение заголовка Cookie для следующего запроса к тому же хосту. */
+  cookie: string;
 };
 
 export type FetchPublicOptions = RequestInit & {
@@ -60,10 +62,22 @@ const readLimited = async (
   return decodeBody(buffer, contentType);
 };
 
+/**
+ * Поисковики по этим заголовкам отличают браузер от бота. Без Sec-Fetch-*
+ * Bing отвечает 200, но подставляет выдачу по чужому запросу.
+ */
 const BROWSER_HEADERS: Record<string, string> = {
   Accept:
     'text/html,application/xhtml+xml,application/xml;q=0.9,application/json;q=0.9,*/*;q=0.8',
   'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+  'Sec-Fetch-Dest': 'document',
+  'Sec-Fetch-Mode': 'navigate',
+  'Sec-Fetch-Site': 'none',
+  'Sec-Fetch-User': '?1',
+  'Sec-CH-UA':
+    '"Chromium";v="126", "Google Chrome";v="126", "Not-A.Brand";v="99"',
+  'Sec-CH-UA-Mobile': '?0',
+  'Sec-CH-UA-Platform': '"macOS"',
   'Upgrade-Insecure-Requests': '1',
 };
 
@@ -125,6 +139,11 @@ const once = async (
       status: response.status,
       contentType,
       body: await readLimited(response, contentType),
+      cookie: response.headers
+        .getSetCookie()
+        .map((raw) => raw.split(';')[0])
+        .filter(Boolean)
+        .join('; '),
     };
   }
 

@@ -41,6 +41,8 @@ export const RunPage = () => {
       return;
     }
 
+    setRun(null);
+
     let timer: number | undefined;
     let cancelled = false;
 
@@ -59,11 +61,14 @@ export const RunPage = () => {
           timer = window.setTimeout(() => void tick(), 1000);
         }
       } catch (err) {
-        if (!cancelled) {
-          setError(
-            err instanceof Error ? err.message : 'Не удалось загрузить запуск',
-          );
+        if (cancelled) {
+          return;
         }
+
+        setError(
+          err instanceof Error ? err.message : 'Не удалось загрузить запуск',
+        );
+        timer = window.setTimeout(() => void tick(), 2000);
       }
     };
 
@@ -78,7 +83,7 @@ export const RunPage = () => {
     };
   }, [id, setRun, setError]);
 
-  if (!run) {
+  if (!run || run.id !== id) {
     return (
       <div className="canvas-page">
         <p className="muted">Загрузка запуска…</p>

@@ -47,6 +47,7 @@ export interface RunWorkflowOptions {
           credentials: Record<string, string>;
           context?: TemplateContext;
           runtime?: ConnectorRuntime;
+          signal?: AbortSignal;
         }) => Promise<{ ok: boolean; data?: unknown; error?: string }>;
       }
     | undefined;

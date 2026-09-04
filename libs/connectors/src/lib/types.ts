@@ -40,6 +40,7 @@ export interface ConnectorExecuteInput {
   credentials: Record<string, string>;
   context?: TemplateContext;
   runtime?: ConnectorRuntime;
+  signal?: AbortSignal;
 }
 
 export interface ConnectorExecuteResult {

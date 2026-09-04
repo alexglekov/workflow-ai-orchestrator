@@ -27,7 +27,7 @@ export const runStatusLabel = (status: string) => {
     return 'отменён';
   }
 
-  return 'ожидает';
+  return 'в очереди';
 };
 
 export const stepStatusLabel = (status: string) => {

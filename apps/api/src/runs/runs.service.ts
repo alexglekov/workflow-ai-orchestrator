@@ -57,6 +57,12 @@ export class RunsService {
       })),
     });
 
+    const source = options?.source ?? 'manual';
+
+    if (source === 'manual' || source === 'retry') {
+      await this.runs.cancelActiveExcept(workflowId, run.id);
+    }
+
     return this.get(run.id);
   };
 
@@ -96,6 +102,16 @@ export class RunsService {
   executeClaimed = async (runId: string) => {
     const run = await this.get(runId);
     const workflow = await this.workflows.get(run.workflowId);
+
+    if (run.cancelRequested) {
+      await this.runs.update(runId, {
+        status: 'cancelled',
+        finishedAt: new Date(),
+        lockedAt: null,
+        lockedBy: null,
+      });
+      return;
+    }
 
     await this.execute(runId, workflow, run.input);
   };

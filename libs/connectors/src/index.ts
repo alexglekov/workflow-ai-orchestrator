@@ -14,4 +14,6 @@ export { browserConnector } from './lib/browser/browser.connector';
 export { telegramCall } from './lib/telegram/api';
 export { completeLlm } from './lib/llm/complete';
 export type { LlmCompleteOptions, LlmMessage, LlmProviderId } from './lib/llm/complete';
+export { resolveLlm } from './lib/llm/resolve';
+export type { ResolvedLlm } from './lib/llm/resolve';
 export { flattenTelegramInput } from './lib/telegram/normalize';

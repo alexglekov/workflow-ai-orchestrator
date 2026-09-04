@@ -170,7 +170,7 @@ runtime?: { workflowId, getState, setState }
 
 ### `@ai-worker/agents`
 
-Провайдеры: Gemini (активный по умолчанию в list), OpenAI, local, orchestrator.
+Провайдеры: Gemini (активный по умолчанию), Qwen и orchestrator («Авто» — берёт первого доступного). Если ключей нет ни у Gemini, ни у Qwen, `resolve` бросает ошибку, а не подставляет заглушку.
 
 - `ask` — ответ с контекстом каталога / подключений / текущего workflow
 - `plan` — `questions` или `workflow`; `sanitizePlan` оставляет только действия из каталога
@@ -235,7 +235,7 @@ interface WorkflowRepository {
 |---|---|---|
 | `runWorkflow` | `getConnector`, `getCredentials`, `onStepUpdate`, `shouldCancel` | несколько адаптеров, I/O, ядро не должно знать Nest/Prisma |
 | `Connector` | `execute` / `testConnection` | плагины: mail vs telegram vs browser |
-| `AgentProvider` | `ask` / `plan` | Gemini vs OpenAI vs local |
+| `AgentProvider` | `ask` / `plan` | Gemini vs Qwen |
 
 | Место | Почему нет порта в «ядре» |
 |---|---|

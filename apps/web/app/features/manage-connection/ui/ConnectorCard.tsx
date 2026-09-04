@@ -148,7 +148,7 @@ export const ConnectorCard = ({
           {connector.id === 'llm' ? (
             <p className="muted">
               Подключать не обязательно, если в .env задан GEMINI_API_KEY или
-              OPENAI_API_KEY. Ключ в карточке нужен, только чтобы переопределить
+              QWEN_API_KEY. Ключ в карточке нужен, только чтобы переопределить
               окружение.
             </p>
           ) : null}

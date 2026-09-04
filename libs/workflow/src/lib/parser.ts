@@ -1,4 +1,4 @@
-import type { Connector } from '@ai-worker/connectors';
+import { completeLlm, resolveLlm, type Connector } from '@ai-worker/connectors';
 import { planFromCatalog, type PlanCatalogConnector } from './catalog-plan';
 import type { ParsedStep } from './types';
 
@@ -133,54 +133,32 @@ export const parsePromptToSteps = async (
   connectors: Connector[],
 ): Promise<ParsedStep[]> => {
   const catalogFallback = () => fallbackParse(prompt, connectors);
-  const key = process.env['OPENAI_API_KEY'];
+  const llm = resolveLlm();
 
-  if (!key) {
+  if (!llm.apiKey) {
     return catalogFallback();
   }
 
   try {
-    const baseUrl =
-      process.env['OPENAI_BASE_URL'] || 'https://api.openai.com/v1';
-    const model = process.env['OPENAI_MODEL'] || 'gpt-4o-mini';
-    const response = await fetch(
-      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: `Ты планировщик workflow. Разложи задачу пользователя в шаги.
+    const content = await completeLlm({
+      ...llm,
+      temperature: 0,
+      json: true,
+      messages: [
+        {
+          role: 'system',
+          content: `Ты планировщик workflow. Разложи задачу пользователя в шаги.
 Используй только действия из каталога. Выбери все действия, которые реально нужны по смыслу промпта, не только «типовую» цепочку почта→Excel→Telegram.
 Доступные коннекторы и параметры: ${JSON.stringify(catalogJson(connectors))}.
 Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{},"iterate":false}]}.
 Параметры бери из текста пользователя. Данные между шагами: {{previous.field}}, {{item.field}}, {{input.field}}, {{steps.1.field}}.
 iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates, social.followers, social.reels и onec.query без iterate.
 Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Instagram/VK/LinkedIn — social. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
-            },
-            { role: 'user', content: prompt },
-          ],
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      return catalogFallback();
-    }
-
-    const body = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = body.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(content) as { steps?: ParsedStep[] };
+        },
+        { role: 'user', content: prompt },
+      ],
+    });
+    const parsed = JSON.parse(content || '{}') as { steps?: ParsedStep[] };
 
     if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) {
       return catalogFallback();

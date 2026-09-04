@@ -64,6 +64,47 @@ export class RunsRepository {
     return Boolean(found);
   };
 
+  cancelActiveExcept = async (workflowId: string, exceptId: string) => {
+    const pending = await this.prisma.run.findMany({
+      where: {
+        workflowId,
+        id: { not: exceptId },
+        status: 'pending',
+      },
+      select: { id: true },
+    });
+
+    if (pending.length > 0) {
+      const ids = pending.map((item) => item.id);
+
+      await this.prisma.run.updateMany({
+        where: { id: { in: ids } },
+        data: {
+          cancelRequested: true,
+          status: 'cancelled',
+          finishedAt: new Date(),
+        },
+      });
+      await this.prisma.runStep.updateMany({
+        where: { runId: { in: ids }, status: 'pending' },
+        data: {
+          status: 'cancelled',
+          error: 'Отменён новым запуском',
+          finishedAt: new Date(),
+        },
+      });
+    }
+
+    await this.prisma.run.updateMany({
+      where: {
+        workflowId,
+        id: { not: exceptId },
+        status: 'running',
+      },
+      data: { cancelRequested: true },
+    });
+  };
+
   heartbeat = (id: string) =>
     this.prisma.run.update({
       where: { id },

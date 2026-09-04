@@ -330,7 +330,8 @@ const fillParams = (
 
   if (connectorId === 'llm' && actionId === 'generate') {
     return {
-      instruction: prompt.slice(0, 400),
+      instruction:
+        'Напиши готовый текст для пользователя (сообщение, отчёт). Не пиши код, скрипты и JSON — только сам текст.',
       text: '{{previous}}',
     };
   }

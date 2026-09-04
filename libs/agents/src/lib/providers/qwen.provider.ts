@@ -15,12 +15,12 @@ import type {
   AgentReply,
 } from '../types';
 
-export class OpenAiAgent implements AgentProvider {
-  id = 'openai';
-  name = 'OpenAI';
+export class QwenAgent implements AgentProvider {
+  id = 'qwen';
+  name = 'Qwen';
   capabilities: AgentProvider['capabilities'] = ['ask', 'plan'];
 
-  available = () => Boolean(agentConfig.openaiKey());
+  available = () => Boolean(agentConfig.qwenKey());
 
   ask = async (input: AgentAskInput): Promise<AgentReply> => {
     const text = await this.complete(
@@ -73,10 +73,10 @@ export class OpenAiAgent implements AgentProvider {
     json = false,
   ) =>
     completeLlm({
-      provider: 'openai',
-      apiKey: agentConfig.openaiKey(),
-      model: agentConfig.openaiModel(),
-      baseUrl: agentConfig.openaiBaseUrl(),
+      provider: 'qwen',
+      apiKey: agentConfig.qwenKey(),
+      model: agentConfig.qwenModel(),
+      baseUrl: agentConfig.qwenBaseUrl(),
       messages,
       temperature,
       json,

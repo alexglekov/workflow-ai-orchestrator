@@ -14,21 +14,30 @@ export default defineConfig(() => ({
       '/api': {
         target: 'http://127.0.0.1:3000',
         changeOrigin: true,
-        timeout: 180_000,
-        proxyTimeout: 180_000,
+        timeout: 300_000,
+        proxyTimeout: 300_000,
         configure: (proxy) => {
-          proxy.on('error', (_err, _req, res) => {
+          proxy.on('proxyReq', (proxyReq) => {
+            proxyReq.setTimeout(300_000);
+          });
+          proxy.on('error', (err, _req, res) => {
             if (
               res &&
               'headersSent' in res &&
               !res.headersSent &&
               'writeHead' in res
             ) {
-              res.writeHead(504, { 'Content-Type': 'application/json' });
+              const down =
+                'code' in err &&
+                (err.code === 'ECONNREFUSED' || err.code === 'ECONNRESET');
+              res.writeHead(down ? 502 : 504, {
+                'Content-Type': 'application/json',
+              });
               res.end(
                 JSON.stringify({
-                  message:
-                    'API не ответил вовремя. Повторите запрос или выберите другого агента.',
+                  message: down
+                    ? 'API не запущен. Подождите секунду и повторите.'
+                    : 'API не ответил вовремя. Повторите запрос или выберите другого агента.',
                 }),
               );
             }

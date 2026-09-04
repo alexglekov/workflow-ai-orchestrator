@@ -88,4 +88,25 @@ describe('rankHits', () => {
       ['good.com'],
     );
   });
+
+  it('ranks a relevant page above Wikipedia for a factual query', () => {
+    const results = rankHits(
+      [
+        hit({
+          title: 'Eastern Time Zone',
+          url: 'https://en.wikipedia.org/wiki/Eastern_Time_Zone',
+          snippet: 'Time zone in North America',
+        }),
+        hit({
+          title: 'What time is it in New York',
+          url: 'https://time.is/New_York',
+          snippet: 'Current local time in New York, USA',
+        }),
+      ],
+      'сколько времени в нью йорке сейчас',
+      5,
+    );
+
+    assert.equal(results[0].host, 'time.is');
+  });
 });

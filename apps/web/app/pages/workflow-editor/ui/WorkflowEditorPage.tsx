@@ -101,7 +101,7 @@ export const WorkflowEditorPage = () => {
             fetchCatalog(),
             fetchConnections(),
             fetchAgents().catch(() => ({
-              active: 'local',
+              active: 'gemini',
               providers: [],
             })),
           ]);
@@ -110,7 +110,7 @@ export const WorkflowEditorPage = () => {
         setCatalog(nextCatalog);
         setConnections(nextConnections);
         setProviders(nextAgents.providers);
-        setProviderId('gemini');
+        setProviderId(nextAgents.active || 'gemini');
         setPrompt(nextWorkflow.prompt);
         setName(nextWorkflow.name);
         setTriggers(await fetchTriggers(id).catch(() => []));
@@ -470,7 +470,7 @@ export const WorkflowEditorPage = () => {
     }
   };
 
-  const run = async () => {
+  const run = async (inputOverride?: Record<string, unknown>) => {
     if (!id) {
       return;
     }
@@ -479,12 +479,14 @@ export const WorkflowEditorPage = () => {
 
     try {
       await persist(workflowRef.current?.steps ?? workflow.steps);
-      let input: Record<string, unknown> = {};
+      let input: Record<string, unknown> = inputOverride ?? {};
 
-      try {
-        input = JSON.parse(runInput || '{}') as Record<string, unknown>;
-      } catch {
-        throw new Error('Input должен быть JSON-объектом');
+      if (inputOverride === undefined) {
+        try {
+          input = JSON.parse(runInput || '{}') as Record<string, unknown>;
+        } catch {
+          throw new Error('Input должен быть JSON-объектом');
+        }
       }
 
       const created = await startRun(id, input);
@@ -492,6 +494,7 @@ export const WorkflowEditorPage = () => {
       navigate(`/runs/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось запустить');
+    } finally {
       setLoading(false);
     }
   };
@@ -569,8 +572,16 @@ export const WorkflowEditorPage = () => {
           <button
             type="button"
             className="play-btn labeled"
-            onClick={() => setRunDialogOpen(true)}
+            onClick={(event) => {
+              if (event.shiftKey) {
+                setRunDialogOpen(true);
+                return;
+              }
+
+              void run({});
+            }}
             disabled={loading || empty}
+            title="Запуск. Shift+клик — с JSON input"
           >
             <Icon name="play" size={13} />
             Run

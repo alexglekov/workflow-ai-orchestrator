@@ -9,6 +9,8 @@ import { fetchPublic } from './fetch-public';
 import { buildQuery } from './query';
 import { rankHits } from './rank';
 import type { SearchHit } from './rank';
+import { composeSearchText, extractiveAnswer } from './answer';
+import { looksRelevant } from './relevance';
 import {
   SEARCH_PROVIDERS,
   providerById,
@@ -16,6 +18,8 @@ import {
   type SearchOptions,
   type SearchProvider,
 } from './providers';
+import { completeLlm } from '../llm/complete';
+import { resolveLlm } from '../llm/resolve';
 
 export type { SearchHit } from './rank';
 export type { SearchConfig } from './providers';
@@ -34,45 +38,56 @@ export type SearchResponse = {
   attempts: ProviderAttempt[];
   degraded: boolean;
   warning?: string;
+  answer: string;
   text: string;
 };
 
 /** Провайдеры, которые ищут по всему вебу. Остальные — аварийный резерв. */
 const WEB_INDEX = new Set([
+  'llm',
+  'gemini',
+  'qwen',
   'brave',
+  'brave-html',
   'google',
   'serper',
   'tavily',
+  'bing',
   'duckduckgo',
   'duckduckgo-lite',
   'mojeek',
   'browser',
 ]);
 
-const NO_PROVIDER_HINT =
-  'Все поисковики отклонили запрос. С серверного IP бесплатный поиск часто блокируется — добавьте ключ в коннекторе Web: Brave Search API (braveApiKey), Google CSE (googleApiKey + googleCx), Serper (serperApiKey) или Tavily (tavilyApiKey).';
+/** Поисковики быстро включают 429, поэтому одинаковые запросы не повторяем. */
+const CACHE_TTL_MS = 5 * 60_000;
+const cache = new Map<string, { at: number; response: SearchResponse }>();
 
-const digest = (
-  query: string,
-  results: SearchHit[],
-  warning?: string,
-): string =>
-  [
-    warning ? `Внимание: ${warning}` : '',
-    `Результаты поиска: ${query}`,
-    ...results.map((item, index) =>
-      [
-        `${index + 1}. ${item.title}`,
-        item.url,
-        item.snippet,
-        item.text ? item.text.slice(0, 1500) : '',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-    ),
-  ]
-    .filter(Boolean)
-    .join('\n\n');
+const cached = (key: string): SearchResponse | undefined => {
+  const found = cache.get(key);
+
+  if (!found) {
+    return undefined;
+  }
+
+  if (Date.now() - found.at > CACHE_TTL_MS) {
+    cache.delete(key);
+    return undefined;
+  }
+
+  return found.response;
+};
+
+const remember = (key: string, response: SearchResponse): void => {
+  if (cache.size > 100) {
+    cache.clear();
+  }
+
+  cache.set(key, { at: Date.now(), response });
+};
+
+const NO_PROVIDER_HINT =
+  'Все поисковики отклонили запрос. Попробуйте ещё раз или добавьте ключ в коннекторе Web: Brave / Google CSE / Serper / Tavily. Бесплатный Bing обычно работает без ключа.';
 
 const chooseProviders = (
   config: SearchConfig,
@@ -105,7 +120,7 @@ const enrich = async (
   await Promise.all(
     targets.map(async (item) => {
       try {
-        const page = await fetchPublic(item.url, { timeoutMs: 12_000, retries: 0 });
+        const page = await fetchPublic(item.url, { timeoutMs: 8_000, retries: 0 });
         const content = readableText(page.body);
 
         if (content.length > 80) {
@@ -120,6 +135,76 @@ const enrich = async (
       }
     }),
   );
+};
+
+const groundedAnswer = (results: SearchHit[]): string => {
+  const fromLlm = results.find(
+    (item) =>
+      (item.provider === 'llm' ||
+        item.provider === 'gemini' ||
+        item.provider === 'qwen') &&
+      (item.text || '').trim().length > 40,
+  );
+
+  return (fromLlm?.text || '').trim();
+};
+
+/** Если модель не ответила, не ждём её на каждом следующем поиске. */
+let llmUnavailableUntil = 0;
+
+const synthesizeAnswer = async (
+  query: string,
+  results: SearchHit[],
+  config: SearchConfig,
+): Promise<string> => {
+  const llm = config.llm ?? resolveLlm();
+
+  if (!llm.apiKey || Date.now() < llmUnavailableUntil) {
+    return '';
+  }
+
+  const sources = results
+    .slice(0, 6)
+    .map((item, index) =>
+      [
+        `${index + 1}. ${item.title}`,
+        item.url,
+        item.snippet,
+        (item.text || '').slice(0, 900),
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    )
+    .join('\n\n');
+
+  try {
+    return (
+      await completeLlm({
+        ...llm,
+        timeoutMs: 20_000,
+        temperature: 0.15,
+        messages: [
+          {
+            role: 'system',
+            content: [
+              'Ты как сниппет Google: сразу ответь на вопрос человека.',
+              'Факты, числа, даты, единицы. 2–6 коротких предложений.',
+              'Не копируй шапки Wikipedia и меню сайтов. Не пиши код.',
+              'Если данные расходятся — скажи об этом и укажи источники.',
+            ].join(' '),
+          },
+          {
+            role: 'user',
+            content: `Вопрос: ${query}\n\nРезультаты поиска:\n${sources}`,
+          },
+        ],
+      })
+    ).trim();
+  } catch {
+    llmUnavailableUntil = Date.now() + 5 * 60_000;
+
+    return '';
+  }
 };
 
 export const webSearch = async (options: {
@@ -149,16 +234,37 @@ export const webSearch = async (options: {
     lang: (options.lang || 'ru').toLowerCase(),
     region: (options.region || 'ru').toLowerCase(),
     freshness: options.freshness,
-    timeoutMs: 20_000,
+    timeoutMs: 12_000,
   };
+  const cacheKey = JSON.stringify([
+    query,
+    limit,
+    searchOptions.lang,
+    searchOptions.region,
+    searchOptions.freshness,
+    options.provider,
+  ]);
+  const hit = cached(cacheKey);
+
+  if (hit) {
+    return hit;
+  }
 
   const attempts: ProviderAttempt[] = [];
   const collected: SearchHit[] = [];
   let winner = '';
 
+  const forced = Boolean(options.provider);
+
   for (const provider of chooseProviders(config, options.provider)) {
     try {
       const found = await provider.run(searchOptions, config);
+
+      if (!forced && !looksRelevant(found, query)) {
+        throw new Error(
+          `${provider.id}: выдача не относится к запросу, источник подменил результаты`,
+        );
+      }
 
       attempts.push({ provider: provider.id, ok: true, results: found.length });
       collected.push(...found);
@@ -167,7 +273,13 @@ export const webSearch = async (options: {
         winner = provider.id;
       }
 
-      if (rankHits(collected, query, limit).length >= limit) {
+      const ranked = rankHits(collected, query, limit);
+
+      if (provider.id === 'llm' && found.length) {
+        break;
+      }
+
+      if (WEB_INDEX.has(provider.id) && ranked.length >= Math.min(limit, 4)) {
         break;
       }
     } catch (error) {
@@ -191,11 +303,11 @@ export const webSearch = async (options: {
     throw new Error(`${NO_PROVIDER_HINT}${details ? ` Детали — ${details}` : ''}`);
   }
 
-  if (options.fetchContent !== false) {
+  if (options.fetchContent !== false && winner !== 'llm') {
     await enrich(
       results,
       Math.min(Math.max(options.contentLimit ?? 3, 0), results.length),
-      Math.min(Math.max(options.contentChars ?? 4000, 500), 20_000),
+      Math.min(Math.max(options.contentChars ?? 1800, 500), 8_000),
     );
   }
 
@@ -205,15 +317,25 @@ export const webSearch = async (options: {
     ? `поисковики по вебу недоступны, выдача собрана резервным источником «${provider}» и может быть неточной. ${NO_PROVIDER_HINT}`
     : undefined;
 
-  return {
+  const answer =
+    groundedAnswer(results) ||
+    (await synthesizeAnswer(query, results, config)) ||
+    extractiveAnswer(results);
+  const text = composeSearchText(query, results, { answer, warning });
+  const response: SearchResponse = {
     query,
     provider,
     results,
     attempts,
     degraded,
     warning,
-    text: digest(query, results, warning),
+    answer,
+    text,
   };
+
+  remember(cacheKey, response);
+
+  return response;
 };
 
 export const webFetch = async (options: {

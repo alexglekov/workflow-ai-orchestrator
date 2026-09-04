@@ -56,24 +56,30 @@ const transcribeMessage = async (
   }
 };
 
+/**
+ * Голосовым Telegram считает только OGG/Opus. Если ffmpeg недоступен и на
+ * руках WAV, отправляем аудиофайлом — это лучше, чем ошибка.
+ */
 const sendVoiceBuffer = async (
   token: string,
   chatId: string,
   buffer: Buffer,
+  mimeType = 'audio/ogg',
 ) => {
+  const asVoice = mimeType === 'audio/ogg';
   const form = new FormData();
+
   form.append('chat_id', chatId);
   form.append(
-    'voice',
-    new Blob([new Uint8Array(buffer)], { type: 'audio/ogg' }),
-    'voice.ogg',
+    asVoice ? 'voice' : 'audio',
+    new Blob([new Uint8Array(buffer)], { type: mimeType }),
+    asVoice ? 'voice.ogg' : 'voice.wav',
   );
 
-  return telegramUpload<{ voice?: { file_id?: string } }>(
-    token,
-    'sendVoice',
-    form,
-  );
+  return telegramUpload<{
+    voice?: { file_id?: string };
+    audio?: { file_id?: string };
+  }>(token, asVoice ? 'sendVoice' : 'sendAudio', form);
 };
 
 export const telegramConnector: Connector = {
@@ -146,7 +152,7 @@ export const telegramConnector: Connector = {
           type: 'string',
           description: 'Ключ кэша, например voice:{{item.chatId}}:{{previous.label}}',
         },
-        voice: { type: 'string', description: 'Голос OpenAI TTS, по умолчанию alloy' },
+        voice: { type: 'string', description: 'Голос Qwen TTS, по умолчанию Cherry' },
         skipIfEmpty: { type: 'boolean', description: 'Пропустить, если нечего слать' },
       },
     },
@@ -337,6 +343,7 @@ export const telegramConnector: Connector = {
         }
 
         let buffer = bufferFromPrevious(input.previousResult);
+        let mimeType = 'audio/ogg';
 
         if (!buffer && firstNonEmpty(params['audioBase64'])) {
           buffer = Buffer.from(String(params['audioBase64']), 'base64');
@@ -358,9 +365,10 @@ export const telegramConnector: Connector = {
             credentials: input.credentials,
           });
           buffer = spoken.buffer;
+          mimeType = spoken.mimeType;
         }
 
-        const uploaded = await sendVoiceBuffer(token, chatId, buffer);
+        const uploaded = await sendVoiceBuffer(token, chatId, buffer, mimeType);
 
         if (!uploaded.ok) {
           return {
@@ -369,7 +377,10 @@ export const telegramConnector: Connector = {
           };
         }
 
-        usedFileId = uploaded.result?.voice?.file_id || usedFileId;
+        usedFileId =
+          uploaded.result?.voice?.file_id ||
+          uploaded.result?.audio?.file_id ||
+          usedFileId;
 
         if (memoryKey && usedFileId && input.runtime?.setState) {
           await input.runtime.setState(memoryKey, usedFileId);

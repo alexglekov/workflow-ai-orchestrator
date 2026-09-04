@@ -29,7 +29,7 @@ export class AgentsService {
   ) {}
 
   list = () => ({
-    active: 'gemini',
+    active: process.env['AGENT_PROVIDER'] || 'gemini',
     providers: this.registry.info(),
   });
 

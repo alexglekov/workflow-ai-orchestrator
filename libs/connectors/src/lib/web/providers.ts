@@ -2,7 +2,10 @@ import { chromium } from 'playwright';
 import { decodeEntities, stripHtml } from './html';
 import { fetchPublic } from './fetch-public';
 import { isUsableUrl } from './rank';
+import { looksRelevant } from './relevance';
 import type { SearchHit } from './rank';
+import { groundedWebSearch } from '../llm/grounded-search';
+import { resolveLlm, type ResolvedLlm } from '../llm/resolve';
 
 export type SearchConfig = {
   braveKey?: string;
@@ -13,6 +16,8 @@ export type SearchConfig = {
   allowScrape?: boolean;
   allowBrowser?: boolean;
   allowWikipedia?: boolean;
+  allowLlmSearch?: boolean;
+  llm?: ResolvedLlm;
 };
 
 export type SearchOptions = {
@@ -57,6 +62,36 @@ const freshnessMap: Record<string, { brave: string; google: string; serper: stri
 
 const blocked = (provider: string): Error =>
   new Error(`${provider}: запрос отклонён анти-ботом, результатов нет`);
+
+const llmSearch: SearchProvider = {
+  id: 'llm',
+  keyed: true,
+  enabled: (config) => {
+    if (config.allowLlmSearch === false) {
+      return false;
+    }
+
+    const llm = config.llm ?? resolveLlm();
+
+    return Boolean(llm.apiKey);
+  },
+  run: async (options, config) => {
+    const found = await groundedWebSearch(
+      options.query,
+      config.llm ?? resolveLlm(),
+    );
+
+    if (!found.results.length) {
+      throw new Error(`${found.provider}: поиск модели не вернул ссылок`);
+    }
+
+    return found.results.map((item) => ({
+      ...item,
+      provider: 'llm',
+      text: item.text || found.text,
+    }));
+  },
+};
 
 const brave: SearchProvider = {
   id: 'brave',
@@ -224,6 +259,161 @@ const anchorsFrom = (html: string, provider: string): SearchHit[] => {
   return results;
 };
 
+/** Bing прячет целевой URL в параметре u=a1… (base64). */
+export const decodeBingUrl = (href: string): string => {
+  const cleaned = decodeEntities(href);
+
+  try {
+    const parsed = new URL(cleaned, 'https://www.bing.com');
+    const encoded = parsed.searchParams.get('u');
+
+    if (encoded?.startsWith('a1')) {
+      const payload = encoded.slice(2);
+      const padded = payload + '='.repeat((4 - (payload.length % 4)) % 4);
+      const decoded = Buffer.from(padded, 'base64').toString('utf8').trim();
+
+      if (/^https?:\/\//i.test(decoded)) {
+        return decoded;
+      }
+    }
+
+    if (/^https?:\/\//i.test(cleaned) && !/bing\.com\/ck\//i.test(cleaned)) {
+      return cleaned;
+    }
+  } catch {
+    // fall through
+  }
+
+  return cleaned;
+};
+
+export const parseBingHtml = (html: string): SearchHit[] => {
+  const results: SearchHit[] = [];
+
+  for (const match of html.matchAll(/<li class="b_algo"[\s\S]*?<\/li>/gi)) {
+    const block = match[0];
+    const link = /<h2[^>]*>\s*<a[^>]+href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(
+      block,
+    );
+
+    if (!link) {
+      continue;
+    }
+
+    const snippet =
+      /<p class="b_lineclamp\d+"[^>]*>([\s\S]*?)<\/p>/i.exec(block) ||
+      /class="b_caption"[\s\S]*?<p[^>]*>([\s\S]*?)<\/p>/i.exec(block);
+
+    results.push(
+      hit('bing', link[2], decodeBingUrl(link[1]), snippet?.[1] ?? ''),
+    );
+  }
+
+  return results;
+};
+
+const bing: SearchProvider = {
+  id: 'bing',
+  keyed: false,
+  enabled: (config) => config.allowScrape !== false,
+  run: async (options) => {
+    const params = new URLSearchParams({
+      q: options.query,
+      setlang: options.lang === 'ru' ? 'ru' : 'en-US',
+      count: String(Math.min(Math.max(options.limit, 5), 20)),
+    });
+
+    if (options.freshness === 'day') {
+      params.set('filters', 'ex1:"ez1"');
+    } else if (options.freshness === 'week') {
+      params.set('filters', 'ex1:"ez2"');
+    } else if (options.freshness === 'month') {
+      params.set('filters', 'ex1:"ez3"');
+    }
+
+    const search = async (cookie?: string) => {
+      const response = await fetchPublic(
+        `https://www.bing.com/search?${params.toString()}`,
+        {
+          timeoutMs: options.timeoutMs,
+          ...(cookie ? { headers: { Cookie: cookie } } : {}),
+        },
+      );
+
+      if (
+        /captcha|challenge|Attention Required/i.test(response.body) &&
+        !/<li class="b_algo"/i.test(response.body)
+      ) {
+        throw blocked('bing');
+      }
+
+      return parseBingHtml(response.body);
+    };
+
+    const first = await search();
+
+    if (first.length && looksRelevant(first, options.query)) {
+      return first;
+    }
+
+    // Bing без сессии отвечает 200, но выдачей по чужому запросу.
+    const home = await fetchPublic('https://www.bing.com/', {
+      timeoutMs: options.timeoutMs,
+      retries: 0,
+    }).catch(() => undefined);
+    const second = home?.cookie ? await search(home.cookie) : [];
+
+    if (second.length && looksRelevant(second, options.query)) {
+      return second;
+    }
+
+    if (!first.length && !second.length) {
+      throw blocked('bing');
+    }
+
+    throw new Error('bing: выдача не относится к запросу');
+  },
+};
+
+/** Brave отдаёт свой индекс и без ключа, но быстро включает 429. */
+const braveHtml: SearchProvider = {
+  id: 'brave-html',
+  keyed: false,
+  enabled: (config) => config.allowScrape !== false && !config.braveKey,
+  run: async (options) => {
+    const response = await fetchPublic(
+      `https://search.brave.com/search?q=${encodeURIComponent(options.query)}`,
+      { timeoutMs: options.timeoutMs, retries: 0 },
+    );
+    const results: SearchHit[] = [];
+
+    for (const match of response.body.matchAll(
+      /<a\b[^>]*href="(https?:\/\/[^"]+)"[^>]*>([\s\S]{0,400}?)<\/a>/gi,
+    )) {
+      const url = decodeEntities(match[1]);
+      const title = text(match[2], 200);
+
+      if (
+        !title ||
+        title.length < 12 ||
+        !isUsableUrl(url) ||
+        /brave\.com/i.test(url) ||
+        results.some((item) => item.url === url)
+      ) {
+        continue;
+      }
+
+      results.push(hit('brave-html', title, url, ''));
+    }
+
+    if (!results.length) {
+      throw blocked('brave-html');
+    }
+
+    return results;
+  },
+};
+
 const decodeDdg = (href: string): string => {
   try {
     const parsed = new URL(decodeEntities(href), 'https://duckduckgo.com');
@@ -235,23 +425,30 @@ const decodeDdg = (href: string): string => {
   }
 };
 
-const parseDdgHtml = (html: string): SearchHit[] => {
+export const parseDdgHtml = (html: string): SearchHit[] => {
   const results: SearchHit[] = [];
-  const blocks = html.split(/<div[^>]+class="[^"]*\bresults?_links?\b[^"]*"/i).slice(1);
+  const blocks = html
+    .split(/<div[^>]+class=["'][^"']*\bresults?_links?\b[^"']*["']/i)
+    .slice(1);
   const source = blocks.length ? blocks : [html];
 
   for (const block of source) {
-    const link = /<a[^>]*class="[^"]*\bresult__a\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/i.exec(
-      block,
-    );
+    const link =
+      /<a[^>]*class=["'][^"']*\bresult__a\b[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/i.exec(
+        block,
+      ) ||
+      /<a[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*\bresult__a\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/i.exec(
+        block,
+      );
 
     if (!link) {
       continue;
     }
 
-    const snippet = /class="[^"]*\bresult__snippet\b[^"]*"[^>]*>([\s\S]*?)<\/(?:a|td|div|span)>/i.exec(
-      block,
-    );
+    const snippet =
+      /class=["'][^"']*\bresult__snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/(?:a|td|div|span)>/i.exec(
+        block,
+      );
 
     results.push(hit('duckduckgo', link[2], decodeDdg(link[1]), snippet?.[1] ?? ''));
   }
@@ -259,15 +456,18 @@ const parseDdgHtml = (html: string): SearchHit[] => {
   return results;
 };
 
-const parseDdgLite = (html: string): SearchHit[] => {
+/** DDG Lite пишет атрибуты в одинарных кавычках, поэтому кавычка — любая. */
+export const parseDdgLite = (html: string): SearchHit[] => {
   const results: SearchHit[] = [];
   const links = [
     ...html.matchAll(
-      /<a[^>]*class="[^"]*\bresult-link\b[^"]*"[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+      /<a[^>]*href=["']([^"']+)["'][^>]*class=["'][^"']*\bresult-link\b[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi,
     ),
   ];
   const snippets = [
-    ...html.matchAll(/class="[^"]*\bresult-snippet\b[^"]*"[^>]*>([\s\S]*?)<\/td>/gi),
+    ...html.matchAll(
+      /class=["'][^"']*\bresult-snippet\b[^"']*["'][^>]*>([\s\S]*?)<\/td>/gi,
+    ),
   ];
 
   links.forEach((link, index) => {
@@ -313,12 +513,23 @@ const duckduckgoLite: SearchProvider = {
   keyed: false,
   enabled: (config) => config.allowScrape !== false,
   run: async (options) => {
-    const response = await fetchPublic('https://lite.duckduckgo.com/lite/', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-      body: new URLSearchParams({ q: options.query, kl: ddgRegion(options) }).toString(),
-      timeoutMs: options.timeoutMs,
+    const params = new URLSearchParams({
+      q: options.query,
+      kl: ddgRegion(options),
     });
+
+    if (options.freshness === 'day') {
+      params.set('df', 'd');
+    } else if (options.freshness === 'week') {
+      params.set('df', 'w');
+    } else if (options.freshness === 'month') {
+      params.set('df', 'm');
+    }
+
+    const response = await fetchPublic(
+      `https://lite.duckduckgo.com/lite/?${params.toString()}`,
+      { timeoutMs: options.timeoutMs },
+    );
     const results = parseDdgLite(response.body);
 
     if (!results.length) {
@@ -391,9 +602,39 @@ const wikipedia: SearchProvider = {
 };
 
 /**
- * Последний рубеж: настоящий Chromium проходит анти-бот там, где обычный
- * HTTP-запрос с серверного IP получает заглушку.
+ * Как человек в браузере: настоящий Chromium с JS, cookies и живой вёрсткой.
+ * Bing идёт первым: Google в headless почти всегда отвечает капчей.
  */
+const SEARCH_ENGINES = [
+  {
+    name: 'bing',
+    url: (options: SearchOptions) =>
+      `https://www.bing.com/search?q=${encodeURIComponent(options.query)}&setlang=${
+        options.lang === 'ru' ? 'ru' : 'en-US'
+      }`,
+    ready: 'li.b_algo h2 a',
+    scrape: 'li.b_algo',
+  },
+  {
+    name: 'duckduckgo',
+    url: (options: SearchOptions) =>
+      `https://html.duckduckgo.com/html/?q=${encodeURIComponent(options.query)}&kl=${ddgRegion(
+        options,
+      )}`,
+    ready: '.result__a, [data-testid="result-title-a"]',
+    scrape: '.result, article[data-testid="result"], li[data-layout="organic"]',
+  },
+  {
+    name: 'google',
+    url: (options: SearchOptions) =>
+      `https://www.google.com/search?q=${encodeURIComponent(options.query)}&hl=${
+        options.lang
+      }&gl=${options.region}&num=20`,
+    ready: '#search a h3, #rso a h3',
+    scrape: '#rso div[data-hveid], #search div[data-hveid]',
+  },
+];
+
 const browserSearch: SearchProvider = {
   id: 'browser',
   keyed: false,
@@ -410,70 +651,102 @@ const browserSearch: SearchProvider = {
       const context = await browser.newContext({
         locale: `${options.lang}-${options.region.toUpperCase()}`,
         userAgent:
-          'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        viewport: { width: 1280, height: 900 },
       });
       const page = await context.newPage();
-      const url = `https://duckduckgo.com/?q=${encodeURIComponent(
-        options.query,
-      )}&kl=${ddgRegion(options)}&ia=web`;
+      const errors: string[] = [];
 
-      await page.goto(url, { waitUntil: 'domcontentloaded', timeout: options.timeoutMs });
-      await page
-        .waitForSelector('[data-testid="result-title-a"], article[data-testid="result"]', {
-          timeout: options.timeoutMs,
-        })
-        .catch(() => undefined);
+      for (const engine of SEARCH_ENGINES) {
+        try {
+          await page.goto(engine.url(options), {
+            waitUntil: 'domcontentloaded',
+            timeout: options.timeoutMs,
+          });
+          await page
+            .waitForSelector(engine.ready, {
+              timeout: Math.min(options.timeoutMs, 5_000),
+            })
+            .catch(() => undefined);
 
-      const raw = await page.evaluate(() =>
-        [...document.querySelectorAll('article[data-testid="result"], li[data-layout="organic"]')]
-          .map((node) => {
-            const link = node.querySelector<HTMLAnchorElement>(
-              'a[data-testid="result-title-a"], h2 a[href], a[href]',
+          // В headless innerText часто пуст, поэтому читаем textContent.
+          const raw = await page.evaluate((selector) =>
+            [...document.querySelectorAll(selector)]
+              .map((node) => {
+                const link = node.querySelector<HTMLAnchorElement>('a[href]');
+                const heading = node.querySelector('h2, h3');
+                const snippet = node.querySelector(
+                  '[data-result="snippet"], .b_lineclamp2, .b_lineclamp3, .result__snippet, div[data-sncf], .VwiC3b',
+                );
+
+                return {
+                  title: (
+                    heading?.textContent ||
+                    link?.textContent ||
+                    ''
+                  ).trim(),
+                  url: link?.href ?? '',
+                  snippet: (snippet?.textContent || '').trim(),
+                };
+              })
+              .filter((item) => item.url && item.title),
+          engine.scrape);
+          const results = raw
+            .map((item) =>
+              hit(
+                'browser',
+                item.title,
+                // Bing и DDG подменяют href редиректом — разворачиваем в целевой URL.
+                decodeDdg(decodeBingUrl(item.url)),
+                item.snippet,
+              ),
+            )
+            .filter(
+              (item) =>
+                isUsableUrl(item.url) &&
+                !/^https?:\/\/(?:www\.|html\.)?(?:google|bing|duckduckgo)\.com/i.test(
+                  item.url,
+                ),
             );
-            const snippet = node.querySelector('[data-result="snippet"]');
 
-            return {
-              title: link?.innerText ?? '',
-              url: link?.href ?? '',
-              snippet: snippet instanceof HTMLElement ? snippet.innerText : '',
-            };
-          })
-          .filter((item) => item.url),
-      );
-      const results = raw.map((item) =>
-        hit('browser', item.title, item.url, item.snippet),
-      );
+          if (results.length && looksRelevant(results, options.query)) {
+            return results;
+          }
 
-      if (results.length) {
-        return results;
+          errors.push(
+            results.length
+              ? `${engine.name}: выдача не по запросу`
+              : `${engine.name}: пусто`,
+          );
+        } catch (error) {
+          errors.push(
+            `${engine.name}: ${
+              error instanceof Error ? error.message.slice(0, 80) : 'ошибка'
+            }`,
+          );
+        }
       }
 
-      // Вёрстка выдачи меняется — разбираем отрендеренный HTML как запасной путь.
-      const fallback = anchorsFrom(await page.content(), 'browser').filter(
-        (item) => !/duckduckgo\.com/i.test(item.url),
-      );
-
-      if (!fallback.length) {
-        throw blocked('browser');
-      }
-
-      return fallback;
+      throw new Error(`browser: ни один поисковик не отдал выдачу (${errors.join('; ')})`);
     } finally {
       await browser.close().catch(() => undefined);
     }
   },
 };
 
-/** Ключевые API идут первыми: они дают стабильную и точную выдачу. */
+/** Сначала поиск выбранной модели (Gemini Google Search / Qwen), затем ключи и скрейп. */
 export const SEARCH_PROVIDERS: SearchProvider[] = [
   brave,
   googleCse,
   serper,
   tavily,
-  duckduckgo,
+  llmSearch,
   duckduckgoLite,
-  mojeek,
+  bing,
   browserSearch,
+  braveHtml,
+  duckduckgo,
+  mojeek,
   wikipedia,
 ];
 

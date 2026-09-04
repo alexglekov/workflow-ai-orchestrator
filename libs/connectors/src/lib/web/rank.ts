@@ -13,7 +13,7 @@ export type SearchHit = {
 const TRACKING = /^(utm_|yclid|gclid|fbclid|_openstat|from|ref|referrer)/i;
 
 const JUNK_URL =
-  /(duckduckgo\.com\/y\.js|\/aclk\?|googleadservices|doubleclick\.net|adservice\.google|bing\.com\/aclick|\.(?:jpg|jpeg|png|gif|svg|ico|css|js|woff2?)(?:$|\?))/i;
+  /(duckduckgo\.com\/y\.js|bing\.com\/ck\/|\/aclk\?|googleadservices|doubleclick\.net|adservice\.google|bing\.com\/aclick|\.(?:jpg|jpeg|png|gif|svg|ico|css|js|woff2?)(?:$|\?))/i;
 
 export const canonicalUrl = (raw: string): string => {
   try {
@@ -86,12 +86,16 @@ export const rankHits = (
     }
 
     const host = hostOf(url);
+    const wiki =
+      /(?:^|\.)wikipedia\.org$/.test(host) || /(?:^|\.)wikiwand\.com$/.test(host);
+    const wantsWiki = /\bwiki/i.test(query);
     const score =
       overlap(terms, hit.title) * 3 +
       overlap(terms, hit.snippet) * 1.5 +
       overlap(terms, host.replace(/[.-]/g, ' ')) * 1.5 +
       (hit.snippet.trim() ? 0.4 : 0) +
-      Math.max(0, 1 - index / 40);
+      Math.max(0, 1 - index / 40) +
+      (wiki && !wantsWiki ? -2 : 0);
     const existing = seen.get(url);
 
     if (existing) {

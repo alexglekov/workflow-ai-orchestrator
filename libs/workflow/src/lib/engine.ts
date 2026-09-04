@@ -93,23 +93,36 @@ const stepTimeoutMs = (
   return connectorId === 'browser' ? 180_000 : 120_000;
 };
 
-const withTimeout = async <T>(ms: number, task: Promise<T>): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | undefined;
+const withTimeout = async <T>(
+  ms: number,
+  shouldCancel: () => Promise<boolean> | boolean,
+  task: (signal: AbortSignal) => Promise<T>,
+): Promise<T> => {
+  const ac = new AbortController();
+  const timer = setTimeout(() => {
+    ac.abort(new Error(`Таймаут шага (${ms} мс)`));
+  }, ms);
+  const poll = setInterval(() => {
+    void Promise.resolve(shouldCancel()).then((yes) => {
+      if (yes) {
+        ac.abort(new Error('Отменён'));
+      }
+    });
+  }, 400);
 
   try {
-    return await Promise.race([
-      task,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(
-          () => reject(new Error(`Таймаут шага (${ms} мс)`)),
-          ms,
-        );
-      }),
-    ]);
-  } finally {
-    if (timer) {
-      clearTimeout(timer);
+    return await task(ac.signal);
+  } catch (err) {
+    if (ac.signal.aborted) {
+      const reason = ac.signal.reason;
+
+      throw reason instanceof Error ? reason : new Error('Отменён');
     }
+
+    throw err;
+  } finally {
+    clearTimeout(timer);
+    clearInterval(poll);
   }
 };
 
@@ -327,14 +340,17 @@ export const runWorkflow = async (
 
           const result = await withTimeout(
             timeoutMs,
-            connector.execute({
-              action: step.action,
-              params,
-              previousResult: item,
-              credentials,
-              context,
-              runtime: options.runtime,
-            }),
+            cancelled,
+            (signal) =>
+              connector.execute({
+                action: step.action,
+                params,
+                previousResult: item,
+                credentials,
+                context,
+                runtime: options.runtime,
+                signal,
+              }),
           );
 
           if (!result.ok) {
@@ -369,8 +385,7 @@ export const runWorkflow = async (
         string,
         unknown
       >;
-      const result = await withTimeout(
-        timeoutMs,
+      const result = await withTimeout(timeoutMs, cancelled, (signal) =>
         connector.execute({
           action: step.action,
           params,
@@ -378,6 +393,7 @@ export const runWorkflow = async (
           credentials,
           context,
           runtime: options.runtime,
+          signal,
         }),
       );
 
@@ -401,12 +417,15 @@ export const runWorkflow = async (
         startedAt,
       );
     } catch (error) {
-      await fail(
-        step.id,
-        error instanceof Error ? error.message : 'Неизвестная ошибка',
-        previous,
-        startedAt,
-      );
+      const message =
+        error instanceof Error ? error.message : 'Неизвестная ошибка';
+
+      if (message === 'Отменён') {
+        await abort(previous, startedAt);
+        return 'cancelled';
+      }
+
+      await fail(step.id, message, previous, startedAt);
 
       return 'error';
     }

@@ -1,6 +1,11 @@
+# Образ Playwright несёт Chromium: без него web.search теряет браузерный резерв.
 FROM mcr.microsoft.com/playwright:v1.62.1-noble AS build
 
 WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY package.json package-lock.json nx.json tsconfig.base.json ./
 COPY apps/api ./apps/api
@@ -15,6 +20,11 @@ FROM mcr.microsoft.com/playwright:v1.62.1-noble
 WORKDIR /app
 ENV NODE_ENV=production
 ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# ffmpeg перекодирует WAV из Qwen TTS в OGG/Opus — иначе Telegram не примет голосовое.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
 
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/package.json ./

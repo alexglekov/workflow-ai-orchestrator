@@ -41,6 +41,12 @@
       }
     }
   },
-  "implicitDependencies": ["data-access", "connectors", "workflow", "agents"],
+  "implicitDependencies": [
+    "data-access",
+    "connectors",
+    "workflow",
+    "agents",
+    "!api"
+  ],
   "tags": []
 }

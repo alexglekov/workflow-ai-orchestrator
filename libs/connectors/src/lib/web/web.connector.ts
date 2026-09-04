@@ -11,6 +11,7 @@ import {
 import { webFetch, webSearch, type SearchConfig } from './client';
 import { normalizeQuery } from './query';
 import { bestchangeRates } from './bestchange';
+import { resolveLlm } from '../llm/resolve';
 
 const searchConfig = (credentials: Record<string, string>): SearchConfig => ({
   braveKey: firstNonEmpty(credentials['braveApiKey'], process.env['BRAVE_API_KEY']),
@@ -24,6 +25,8 @@ const searchConfig = (credentials: Record<string, string>): SearchConfig => ({
   allowScrape: credentials['allowScrape'] !== 'false',
   allowBrowser: credentials['allowBrowser'] !== 'false',
   allowWikipedia: credentials['allowWikipedia'] !== 'false',
+  allowLlmSearch: credentials['allowLlmSearch'] !== 'false',
+  llm: resolveLlm(credentials),
 });
 
 const searchQuery = (
@@ -85,6 +88,11 @@ export const webConnector: Connector = {
     'Поиск и чтение публичных страниц: ИНН, BestChange, справки. Структуру из текста достаёт llm.extract',
   credentialFields: [
     {
+      key: 'allowLlmSearch',
+      label: 'Искать через Gemini/Qwen (true/false)',
+      placeholder: 'true — Google Search у Gemini или enable_search у Qwen',
+    },
+    {
       key: 'braveApiKey',
       label: 'Brave Search API (рекомендуется)',
       secret: true,
@@ -127,7 +135,7 @@ export const webConnector: Connector = {
       id: 'search',
       name: 'Найти в вебе',
       description:
-        'Публичный поиск с перебором провайдеров, дедупом и подгрузкой текста страниц. Результат: results[] и готовый text',
+        'Ищет как в браузере и сразу пишет ответ по выдаче. Результат: answer/text и results[] со ссылками',
       paramsSchema: {
         query: {
           type: 'string',
@@ -153,7 +161,7 @@ export const webConnector: Connector = {
         provider: {
           type: 'string',
           description:
-            'Форсировать провайдера: brave | google | serper | tavily | duckduckgo | mojeek | browser | wikipedia',
+            'Форсировать провайдера: llm | brave | google | serper | tavily | duckduckgo-lite | bing | browser | brave-html | duckduckgo | mojeek | wikipedia',
         },
       },
     },

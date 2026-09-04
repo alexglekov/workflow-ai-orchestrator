@@ -14,12 +14,13 @@ x-app-env: &app-env
   GEMINI_API_KEY: ${GEMINI_API_KEY:-}
   GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.6-flash}
   GEMINI_BASE_URL: ${GEMINI_BASE_URL:-https://generativelanguage.googleapis.com/v1beta}
-  OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-  OPENAI_BASE_URL: ${OPENAI_BASE_URL:-https://api.openai.com/v1}
-  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-4o-mini}
-  OPENAI_TTS_MODEL: ${OPENAI_TTS_MODEL:-tts-1}
-  OPENAI_TTS_VOICE: ${OPENAI_TTS_VOICE:-alloy}
-  OPENAI_TRANSCRIBE_MODEL: ${OPENAI_TRANSCRIBE_MODEL:-whisper-1}
+  QWEN_API_KEY: ${QWEN_API_KEY:-}
+  QWEN_BASE_URL: ${QWEN_BASE_URL:-https://dashscope-intl.aliyuncs.com/compatible-mode/v1}
+  QWEN_MODEL: ${QWEN_MODEL:-qwen-plus}
+  QWEN_TTS_MODEL: ${QWEN_TTS_MODEL:-qwen3-tts-flash}
+  QWEN_TTS_VOICE: ${QWEN_TTS_VOICE:-Cherry}
+  QWEN_TRANSCRIBE_MODEL: ${QWEN_TRANSCRIBE_MODEL:-qwen3-asr-flash}
+  FFMPEG_PATH: ${FFMPEG_PATH:-}
   BRAVE_API_KEY: ${BRAVE_API_KEY:-}
   GOOGLE_SEARCH_API_KEY: ${GOOGLE_SEARCH_API_KEY:-}
   GOOGLE_SEARCH_CX: ${GOOGLE_SEARCH_CX:-}
@@ -64,6 +65,8 @@ services:
     environment:
       <<: *app-env
       PORT: '3000'
+    # Chromium в web.search падает на дефолтных 64 МБ /dev/shm.
+    shm_size: 512mb
     healthcheck:
       test: ['CMD-SHELL', 'node -e "fetch(\"http://127.0.0.1:3000/api/health\").then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"']
       interval: 10s
@@ -81,6 +84,7 @@ services:
         condition: service_healthy
     environment:
       <<: *app-env
+    shm_size: 512mb
 
   web:
     build:
