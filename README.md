@@ -140,11 +140,15 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 
 Для публичных справок: ИНН, открытые сайты. Числа со страницы достаёт `llm.extract`. CRM — 1С:CRM. Курсы BestChange — не HTML.
 
-- `web.search` — поиск (DuckDuckGo; опционально Brave Search API)
-- `web.fetch` — скачать URL и вернуть текст и таблицы
+- `web.search` — поиск с перебором провайдеров. Параметры: `query`, `limit`, `site`, `lang`, `region`, `freshness` (`day`/`week`/`month`/`year`), `fetchContent`, `contentLimit`, `provider`
+- `web.fetch` — скачать URL и вернуть текст и таблицы (`full: true` — вместе с меню и подвалом)
 - `web.rates` — BTC/LTC/USDT → RUB из `api.bestchange.ru/info.zip` (поля `btcRub`, `ltcRub`, `usdtRub` и готовый `text`)
 
-Подключение необязательно. Приватные адреса и localhost закрыты. Instagram/личные кабинеты этим шагом не открыть — для соцсетей коннектор **Social**.
+**Ключ для поиска обязателен на сервере.** С IP дата-центра DuckDuckGo и Mojeek отдают анти-бот заглушку. Порядок провайдеров: Brave → Google CSE → Serper → Tavily → DuckDuckGo → Mojeek → Chromium → Wikipedia. Первый ответивший выигрывает, остальные остаются резервом. Ключи — в карточке коннектора или в `.env`: `BRAVE_API_KEY` (2000 запросов/мес бесплатно), `GOOGLE_SEARCH_API_KEY` + `GOOGLE_SEARCH_CX`, `SERPER_API_KEY`, `TAVILY_API_KEY`.
+
+`web.search` возвращает `results[]` (`title`, `url`, `host`, `snippet`, `score`, `text`), `attempts[]` с причиной отказа каждого провайдера и готовый `text` для `llm.extract`. Выдача дедуплицируется, реклама и трекинг-параметры отбрасываются, один домен не занимает больше двух мест. По умолчанию догружается текст первых трёх страниц — `fetchContent: false` отключает. Если сработал только резерв, в ответе будет `degraded: true` и `warning`.
+
+Подключение необязательно, но без ключа поиск деградирует. Приватные адреса и localhost закрыты. Instagram/личные кабинеты этим шагом не открыть — для соцсетей коннектор **Social**.
 
 Пример курса: `web.rates` → `telegram.send_message`. Пример справки: `web.fetch` → `llm.extract` → `telegram.send_message`.
 

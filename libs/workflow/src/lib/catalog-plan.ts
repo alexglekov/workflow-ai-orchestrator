@@ -207,6 +207,34 @@ const excelFileName = (prompt: string): string =>
   prompt.match(/\b([\w.-]+\.xlsx?)\b/i)?.[1] ||
   '';
 
+// \b не работает с кириллицей, поэтому границы слов — через \p{L} с флагом u.
+const SEARCH_NOISE = [
+  /(?<![\p{L}])кажд(?:ый|ое|ую)\s+(?:день|утро|час|неделю|минуту)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:ежедневно|ежечасно|по расписанию)(?![\p{L}])/giu,
+  /(?<![\p{L}])каждые\s+\d+\s*\p{L}*/giu,
+  /(?<![\p{L}])в\s+\d{1,2}(?:[:.]\d{2})?(?:\s*(?:утра|вечера|часов|час|ч))?(?![\p{L}\d])/giu,
+  /(?<![\p{L}])(?:пришли|присылай|отправь|отправляй|напиши|сообщи|скинь|добавь|сохрани|запиши)[^,.;]*?(?:телеграм\p{L}*|telegram|почт\p{L}*|email|mail|excel|таблиц\p{L}*|чат\p{L}*|бот\p{L}*)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:в|на)\s+(?:телеграм\p{L}*|telegram|почту|excel|таблицу)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:в|во)\s+интернете(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:найди|найти|поищи|проверь|узнай|посмотри|подскажи|нужно|надо|пожалуйста)(?![\p{L}])/giu,
+];
+
+const DANGLING = /^(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же)(?![\p{L}]))+|(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же)(?![\p{L}]))+$/giu;
+
+/** Из формулировки задачи делает короткую поисковую фразу без расписания и доставки. */
+export const searchPhrase = (prompt: string): string => {
+  const cleaned = SEARCH_NOISE.reduce(
+    (text, pattern) => text.replace(pattern, ' '),
+    prompt,
+  )
+    .replace(/\s*[,;]\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(DANGLING, '')
+    .trim();
+
+  return (cleaned.length >= 3 ? cleaned : prompt.trim()).slice(0, 200);
+};
+
 const fillParams = (
   connectorId: string,
   actionId: string,
@@ -255,7 +283,7 @@ const fillParams = (
   }
 
   if (connectorId === 'web' && actionId === 'search') {
-    return { query: prompt.trim().slice(0, 220), limit: 5 };
+    return { query: searchPhrase(prompt), limit: 5 };
   }
 
   if (connectorId === 'web' && actionId === 'fetch') {

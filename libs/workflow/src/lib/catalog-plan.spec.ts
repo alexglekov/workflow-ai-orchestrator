@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { planFromCatalog, type PlanCatalogConnector } from './catalog-plan';
+import {
+  planFromCatalog,
+  searchPhrase,
+  type PlanCatalogConnector,
+} from './catalog-plan';
 
 const catalog: PlanCatalogConnector[] = [
   {
@@ -62,5 +66,21 @@ describe('planFromCatalog', () => {
 
     assert.ok(steps.includes('web.rates'));
     assert.ok(!steps.includes('web.fetch'));
+  });
+
+});
+
+describe('searchPhrase', () => {
+  it('strips schedule and delivery noise', () => {
+    const query = searchPhrase(
+      'каждое утро в 9 найди в интернете новости про ЦБ и пришли в телеграм',
+    );
+
+    assert.ok(query.includes('новости про ЦБ'));
+    assert.equal(/телеграм|каждое утро|найди/i.test(query), false);
+  });
+
+  it('keeps the prompt when nothing meaningful is left', () => {
+    assert.equal(searchPhrase('найди'), 'найди');
   });
 });

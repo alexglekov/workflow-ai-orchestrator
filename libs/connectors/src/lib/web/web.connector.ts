@@ -8,14 +8,23 @@ import {
   interpolate,
   mergeContext,
 } from '../interpolate';
-import { webFetch, webSearch } from './client';
+import { webFetch, webSearch, type SearchConfig } from './client';
+import { normalizeQuery } from './query';
 import { bestchangeRates } from './bestchange';
 
-const braveKey = (credentials: Record<string, string>) =>
-  firstNonEmpty(
-    credentials['braveApiKey'],
-    process.env['BRAVE_API_KEY'],
-  );
+const searchConfig = (credentials: Record<string, string>): SearchConfig => ({
+  braveKey: firstNonEmpty(credentials['braveApiKey'], process.env['BRAVE_API_KEY']),
+  googleKey: firstNonEmpty(
+    credentials['googleApiKey'],
+    process.env['GOOGLE_SEARCH_API_KEY'],
+  ),
+  googleCx: firstNonEmpty(credentials['googleCx'], process.env['GOOGLE_SEARCH_CX']),
+  serperKey: firstNonEmpty(credentials['serperApiKey'], process.env['SERPER_API_KEY']),
+  tavilyKey: firstNonEmpty(credentials['tavilyApiKey'], process.env['TAVILY_API_KEY']),
+  allowScrape: credentials['allowScrape'] !== 'false',
+  allowBrowser: credentials['allowBrowser'] !== 'false',
+  allowWikipedia: credentials['allowWikipedia'] !== 'false',
+});
 
 const searchQuery = (
   params: Record<string, unknown>,
@@ -30,9 +39,11 @@ const searchQuery = (
           (previous as Record<string, unknown>)['text'],
           (previous as Record<string, unknown>)['subject'],
         )
-      : '';
+      : typeof previous === 'string'
+        ? previous
+        : '';
 
-  return firstNonEmpty(ctx['query'], fromPrevious);
+  return normalizeQuery(firstNonEmpty(ctx['query'], ctx['q'], fromPrevious));
 };
 
 const fetchUrl = (
@@ -59,6 +70,14 @@ const fetchUrl = (
   );
 };
 
+const flag = (value: unknown, fallback: boolean): boolean => {
+  if (value === undefined || value === null || value === '') {
+    return fallback;
+  }
+
+  return value !== false && value !== 'false' && value !== 0 && value !== '0';
+};
+
 export const webConnector: Connector = {
   id: 'web',
   name: 'Web',
@@ -67,9 +86,40 @@ export const webConnector: Connector = {
   credentialFields: [
     {
       key: 'braveApiKey',
-      label: 'Brave Search API (необязательно)',
+      label: 'Brave Search API (рекомендуется)',
       secret: true,
-      placeholder: 'Если пусто — DuckDuckGo HTML',
+      placeholder: 'brave.com/search/api — 2000 запросов/мес бесплатно',
+    },
+    {
+      key: 'googleApiKey',
+      label: 'Google Custom Search API key',
+      secret: true,
+      placeholder: 'console.cloud.google.com → Custom Search API',
+    },
+    {
+      key: 'googleCx',
+      label: 'Google CSE id (cx)',
+      placeholder: 'programmablesearchengine.google.com',
+    },
+    {
+      key: 'serperApiKey',
+      label: 'Serper.dev API key (Google-выдача)',
+      secret: true,
+    },
+    {
+      key: 'tavilyApiKey',
+      label: 'Tavily API key (поиск с текстом страниц)',
+      secret: true,
+    },
+    {
+      key: 'allowScrape',
+      label: 'Разрешить бесплатные DuckDuckGo/Mojeek (true/false)',
+      placeholder: 'true',
+    },
+    {
+      key: 'allowBrowser',
+      label: 'Резерв через Chromium, если поисковик блокирует (true/false)',
+      placeholder: 'true',
     },
   ],
   actions: [
@@ -77,14 +127,34 @@ export const webConnector: Connector = {
       id: 'search',
       name: 'Найти в вебе',
       description:
-        'Публичный поиск. query или текст/ИНН с предыдущего шага',
+        'Публичный поиск с перебором провайдеров, дедупом и подгрузкой текста страниц. Результат: results[] и готовый text',
       paramsSchema: {
         query: {
           type: 'string',
           required: true,
           description: 'Запрос. Можно {{previous.inn}} или {{item.text}}',
         },
-        limit: { type: 'number', description: 'Число результатов, 1–10' },
+        limit: { type: 'number', description: 'Число результатов, 1–20 (по умолчанию 5)' },
+        site: { type: 'string', description: 'Ограничить доменом, например nalog.gov.ru' },
+        lang: { type: 'string', description: 'Язык выдачи, по умолчанию ru' },
+        region: { type: 'string', description: 'Регион выдачи, по умолчанию ru' },
+        freshness: {
+          type: 'string',
+          description: 'day | week | month | year — только свежие страницы',
+        },
+        fetchContent: {
+          type: 'boolean',
+          description: 'Подгрузить текст страниц из выдачи (по умолчанию true)',
+        },
+        contentLimit: {
+          type: 'number',
+          description: 'Сколько страниц подгружать, по умолчанию 3',
+        },
+        provider: {
+          type: 'string',
+          description:
+            'Форсировать провайдера: brave | google | serper | tavily | duckduckgo | mojeek | browser | wikipedia',
+        },
       },
     },
     {
@@ -101,6 +171,10 @@ export const webConnector: Connector = {
           type: 'number',
           description: 'Обрезка текста, по умолчанию 12000',
         },
+        full: {
+          type: 'boolean',
+          description: 'Весь текст вместе с меню и подвалом, по умолчанию false',
+        },
       },
     },
     {
@@ -115,17 +189,14 @@ export const webConnector: Connector = {
     try {
       const result = await webSearch({
         query: 'BestChange USDT RUB',
-        limit: 1,
-        braveKey: braveKey(credentials) || undefined,
+        limit: 3,
+        fetchContent: false,
+        config: searchConfig(credentials),
       });
-
-      if (!result.results.length) {
-        return { ok: false, error: 'Поиск не вернул результатов' };
-      }
 
       return {
         ok: true,
-        message: `${result.provider}: ${result.results[0].title}`,
+        message: `${result.provider}: ${result.results.length} результатов, первый — ${result.results[0].title}`,
       };
     } catch (error) {
       return {
@@ -146,15 +217,22 @@ export const webConnector: Connector = {
       if (input.action === 'search') {
         const query = searchQuery(params, input.previousResult);
 
+        if (!query) {
+          return { ok: false, error: 'Не указан query для web.search' };
+        }
+
         const data = await webSearch({
           query,
           limit: Number(params['limit'] || 5),
-          braveKey: braveKey(input.credentials) || undefined,
+          site: firstNonEmpty(params['site']),
+          lang: firstNonEmpty(params['lang']) || 'ru',
+          region: firstNonEmpty(params['region']) || 'ru',
+          freshness: firstNonEmpty(params['freshness']) || undefined,
+          provider: firstNonEmpty(params['provider']) || undefined,
+          fetchContent: flag(params['fetchContent'], true),
+          contentLimit: Number(params['contentLimit'] || 3),
+          config: searchConfig(input.credentials),
         });
-
-        if (!data.results.length) {
-          return { ok: false, error: 'Поиск не вернул результатов' };
-        }
 
         return { ok: true, data };
       }
@@ -169,6 +247,7 @@ export const webConnector: Connector = {
         const data = await webFetch({
           url,
           maxChars: Number(params['maxChars'] || 12_000),
+          full: flag(params['full'], false),
         });
 
         return { ok: true, data };

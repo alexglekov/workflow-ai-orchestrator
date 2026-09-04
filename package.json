@@ -17,8 +17,9 @@
     "build:worker": "nx build worker",
     "prod:up": "docker compose --env-file .env -f infra/docker/docker-compose.prod.yml up -d --build",
     "prod:down": "docker compose --env-file .env -f infra/docker/docker-compose.prod.yml down",
+    "prod:reset": "docker compose --env-file .env -f infra/docker/docker-compose.prod.yml down -v && docker compose --env-file .env -f infra/docker/docker-compose.prod.yml up -d --build",
     "prod:logs": "docker compose --env-file .env -f infra/docker/docker-compose.prod.yml logs -f",
-    "test": "tsx --tsconfig tsconfig.base.json --test libs/workflow/src/lib/when.spec.ts libs/workflow/src/lib/catalog-plan.spec.ts libs/connectors/src/lib/interpolate.spec.ts libs/connectors/src/lib/web/zip.spec.ts apps/api/src/triggers/lib/is-due.spec.ts",
+    "test": "tsx --tsconfig tsconfig.base.json --test libs/workflow/src/lib/when.spec.ts libs/workflow/src/lib/catalog-plan.spec.ts libs/connectors/src/lib/interpolate.spec.ts libs/connectors/src/lib/web/zip.spec.ts libs/connectors/src/lib/web/html.spec.ts libs/connectors/src/lib/web/query.spec.ts libs/connectors/src/lib/web/rank.spec.ts apps/api/src/triggers/lib/is-due.spec.ts",
     "postinstall": "prisma generate --schema=libs/data-access/prisma/schema.prisma"
   },
   "prisma": {
