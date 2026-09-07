@@ -92,7 +92,29 @@ export const ApiGate = ({ children }: { children: React.ReactNode }) => {
   };
 
   if (!ready) {
-    return <p className="muted">Загрузка…</p>;
+    return (
+      <div className="canvas-page">
+        <p className="muted">Загрузка…</p>
+      </div>
+    );
+  }
+
+  if (error && !open) {
+    return (
+      <div className="canvas-page">
+        <div className="dialog-sheet api-gate">
+          <div className="dialog-head">
+            <h2>Нет связи с API</h2>
+          </div>
+          <Banner>{error}</Banner>
+          <div className="dialog-actions">
+            <Button type="button" onClick={() => window.location.reload()}>
+              Повторить
+            </Button>
+          </div>
+        </div>
+      </div>
+    );
   }
 
   if (!open) {

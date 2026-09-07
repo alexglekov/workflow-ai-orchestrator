@@ -33,7 +33,11 @@ export const Layout = ({ children }: { children: React.ReactNode }) => (
   <html lang="ru">
     <head>
       <meta charSet="utf-8" />
-      <meta name="viewport" content="width=device-width, initial-scale=1" />
+      <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1, viewport-fit=cover"
+      />
+      <meta name="theme-color" content="#f6f6f8" />
       <Meta />
       <Links />
     </head>

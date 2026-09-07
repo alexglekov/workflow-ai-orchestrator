@@ -75,6 +75,9 @@ export const WorkflowEditorPage = () => {
   const [planning, setPlanning] = useState(false);
   const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
   const [providerId, setProviderId] = useState('gemini');
+  const [mobileTab, setMobileTab] = useState<'triggers' | 'chat' | 'flow'>(
+    'chat',
+  );
   const persistTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const persistGen = useRef(0);
   const nameRef = useRef(name);
@@ -141,6 +144,15 @@ export const WorkflowEditorPage = () => {
       }
     })();
   }, [id, setCatalog, setConnections, setError, setWorkflow]);
+
+  useEffect(() => {
+    const hasFlow =
+      Boolean(workflow?.steps.length) || triggers.length > 0;
+
+    if (!hasFlow && mobileTab === 'flow') {
+      setMobileTab('chat');
+    }
+  }, [workflow, triggers.length, mobileTab]);
 
   const loadOlderChat = useCallback(async () => {
     if (!id) {
@@ -445,6 +457,7 @@ export const WorkflowEditorPage = () => {
     const action = connector.actions[0];
 
     setPickerOpen(false);
+    setMobileTab('flow');
     replaceSteps(
       [
         ...current.steps,
@@ -489,6 +502,7 @@ export const WorkflowEditorPage = () => {
       });
 
       setTriggers((current) => [...current, created]);
+      setMobileTab('triggers');
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось добавить триггер');
@@ -603,7 +617,10 @@ export const WorkflowEditorPage = () => {
   };
 
   return (
-    <div className={`canvas-page editor-page${empty ? ' is-empty' : ''}`}>
+    <div
+      className={`canvas-page editor-page${empty ? ' is-empty' : ''}`}
+      data-mobile-tab={mobileTab}
+    >
       <header className="canvas-chrome">
         <Link
           to="/workflows"
@@ -662,11 +679,41 @@ export const WorkflowEditorPage = () => {
             title="Запуск. Shift+клик — с JSON input"
           >
             <Icon name="play" size={13} />
-            Run
+            <span className="play-label">Run</span>
           </button>
         </div>
       </header>
       {error ? <Banner>{error}</Banner> : null}
+      <nav className="editor-tabs" aria-label="Разделы редактора">
+        <button
+          type="button"
+          className={mobileTab === 'triggers' ? 'active' : ''}
+          onClick={() => setMobileTab('triggers')}
+        >
+          Триггеры
+          {triggers.length ? (
+            <span className="tab-count">{triggers.length}</span>
+          ) : null}
+        </button>
+        <button
+          type="button"
+          className={mobileTab === 'chat' ? 'active' : ''}
+          onClick={() => setMobileTab('chat')}
+        >
+          Чат
+        </button>
+        <button
+          type="button"
+          className={mobileTab === 'flow' ? 'active' : ''}
+          disabled={!showFlow}
+          onClick={() => setMobileTab('flow')}
+        >
+          Схема
+          {workflow.steps.length ? (
+            <span className="tab-count">{workflow.steps.length}</span>
+          ) : null}
+        </button>
+      </nav>
       <div className="editor-body">
         <TriggerPanel
           triggers={triggers}

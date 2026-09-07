@@ -25,6 +25,7 @@ html,
 body {
   margin: 0;
   min-height: 100%;
+  min-height: 100dvh;
   background: var(--bg);
   color: var(--ink);
   font-family: var(--sans);
@@ -46,6 +47,7 @@ select {
 
 button {
   -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation;
 }
 
 :focus-visible {
@@ -55,15 +57,21 @@ button {
 
 .app {
   height: 100vh;
+  height: 100dvh;
   min-height: 100vh;
+  min-height: 100dvh;
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  padding-left: env(safe-area-inset-left);
+  padding-right: env(safe-area-inset-right);
 }
 
 .topbar {
   height: 58px;
   padding: 0 20px;
+  padding-top: env(safe-area-inset-top);
+  height: calc(58px + env(safe-area-inset-top));
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -1112,7 +1120,7 @@ select:focus {
   min-height: 96px;
   padding: 2px 2px 14px;
   outline: none;
-  font-size: 15.5px;
+  font-size: 16px;
   line-height: 1.5;
   color: var(--ink);
   box-shadow: none;
@@ -1382,6 +1390,17 @@ select.agent-select:focus {
   padding: 0;
   cursor: pointer;
   text-align: left;
+}
+
+.node-row-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.editor-tabs {
+  display: none;
 }
 
 .node-copy {
@@ -2347,6 +2366,135 @@ button.chevron:hover {
     top: 78px;
   }
 
+  .topbar {
+    padding-left: 12px;
+    padding-right: 12px;
+    gap: 10px;
+  }
+
+  .top-nav a {
+    padding: 8px 12px;
+    min-height: 36px;
+    display: inline-flex;
+    align-items: center;
+  }
+
+  .canvas-page {
+    padding: 12px 12px calc(16px + env(safe-area-inset-bottom));
+  }
+
+  .canvas-page.editor-page,
+  .canvas-page.run-page {
+    padding: 8px 10px calc(10px + env(safe-area-inset-bottom));
+  }
+
+  .canvas-page.list-page {
+    padding: 16px 12px calc(28px + env(safe-area-inset-bottom));
+    grid-template-columns: 1fr;
+  }
+
+  .list-shell {
+    grid-column: 1;
+  }
+
+  .list-title {
+    font-size: 20px;
+    margin-bottom: 14px;
+  }
+
+  .list-page .node-row .chip.mcp,
+  .node-pick .chip.mcp {
+    display: none;
+  }
+
+  input,
+  textarea,
+  select {
+    font-size: 16px;
+  }
+
+  .icon-btn,
+  .workflow-delete,
+  .send-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .send-btn {
+    width: 44px;
+    height: 44px;
+  }
+
+  .play-btn.labeled {
+    padding: 0 12px 0 10px;
+  }
+
+  .editor-page .canvas-chrome,
+  .run-page .canvas-chrome {
+    gap: 6px;
+    padding: 6px;
+  }
+
+  .editor-page .canvas-title {
+    font-size: 15px;
+    padding-left: 4px;
+  }
+
+  .editor-tabs {
+    display: flex;
+    flex-shrink: 0;
+    gap: 4px;
+    margin: 0 0 10px;
+    padding: 3px;
+    background: #f3f3f6;
+    border-radius: 14px;
+  }
+
+  .editor-tabs button {
+    flex: 1;
+    min-height: 40px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    color: var(--muted);
+    font-size: 13px;
+    font-weight: 650;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    cursor: pointer;
+  }
+
+  .editor-tabs button.active {
+    background: #fff;
+    color: var(--ink);
+    box-shadow: 0 1px 3px rgba(17, 17, 19, 0.08);
+  }
+
+  .editor-tabs button:disabled {
+    opacity: 0.4;
+    cursor: default;
+  }
+
+  .tab-count {
+    min-width: 18px;
+    height: 18px;
+    padding: 0 5px;
+    border-radius: 999px;
+    background: #ececf1;
+    color: var(--ink);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+  }
+
+  .editor-tabs button.active .tab-count {
+    background: #f4ecff;
+    color: #7a3dff;
+  }
+
   .canvas-page.with-flow .canvas-workspace {
     grid-template-columns: 1fr;
     grid-template-rows: auto minmax(180px, 0.8fr) minmax(0, 1.2fr);
@@ -2363,26 +2511,155 @@ button.chevron:hover {
 
   .editor-body {
     grid-template-columns: 1fr;
-    grid-template-rows: minmax(150px, 30%) minmax(0, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr);
+    gap: 0;
   }
 
-  .canvas-page.list-page {
-    grid-template-columns: 1fr;
-  }
-
-  .list-shell {
-    grid-column: 1;
-  }
-
-  .list-page .node-row .chip.mcp {
+  .editor-page[data-mobile-tab='triggers'] .editor-main,
+  .editor-page[data-mobile-tab='triggers'] .canvas-flow,
+  .editor-page[data-mobile-tab='chat'] .rail-panel,
+  .editor-page[data-mobile-tab='chat'] .canvas-flow,
+  .editor-page[data-mobile-tab='flow'] .rail-panel,
+  .editor-page[data-mobile-tab='flow'] .editor-main {
     display: none;
   }
 
   .rail-panel {
     width: 100%;
+    max-width: none;
+    justify-self: stretch;
   }
 
   .editor-body > .canvas-flow {
-    padding-bottom: 16px;
+    padding: 4px 0 8px;
+    justify-content: stretch;
+  }
+
+  .editor-body > .canvas-flow .pipeline {
+    width: 100%;
+  }
+
+  .editor-main.is-empty .composer-dock,
+  .editor-hero .start-tiles {
+    width: 100%;
+  }
+
+  .prompt-card {
+    padding: 14px 14px 10px;
+  }
+
+  .prompt-card textarea {
+    min-height: 72px;
+  }
+
+  .prompt-toolbar .row-actions {
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  select.agent-select {
+    min-width: 0;
+    flex: 1;
+    height: 36px;
+    font-size: 14px;
+  }
+
+  .node-picker {
+    place-items: end center;
+    padding: 0;
+    background: rgba(17, 17, 19, 0.4);
+  }
+
+  .node-picker-sheet,
+  .dialog-sheet:not(.api-gate) {
+    width: 100%;
+    max-width: none;
+    max-height: min(92dvh, 100%);
+    border-radius: 20px 20px 0 0;
+    padding: 16px 16px calc(16px + env(safe-area-inset-bottom));
+    animation: sheet-up 240ms cubic-bezier(0.2, 0.8, 0.2, 1);
+  }
+
+  .dialog-sheet.api-gate {
+    width: min(420px, calc(100% - 24px));
+    margin: auto;
+    border-radius: 22px;
+  }
+
+  .node-picker-list {
+    max-height: 56dvh;
+  }
+
+  .dialog-actions {
+    flex-wrap: wrap;
+  }
+
+  .dialog-actions .btn {
+    min-height: 44px;
+  }
+
+  .workflow-row {
+    align-items: stretch;
+  }
+
+  .workflow-card {
+    padding: 12px;
+  }
+
+  .run-page .canvas-board,
+  .run-meta-card {
+    width: 100%;
+  }
+
+  .flow-node .node-row {
+    flex-wrap: wrap;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand strong {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+
+  .play-label {
+    display: none;
+  }
+
+  .play-btn.labeled {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+    justify-content: center;
+  }
+
+  .chrome-actions {
+    gap: 4px;
+  }
+
+  .node-row-meta {
+    margin-left: auto;
+  }
+
+  .trigger-card-head {
+    flex-wrap: wrap;
+  }
+
+  .trigger-card-head .trigger-copy {
+    flex: 1 1 120px;
+  }
+}
+
+@keyframes sheet-up {
+  from {
+    opacity: 0;
+    transform: translateY(24px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
   }
 }

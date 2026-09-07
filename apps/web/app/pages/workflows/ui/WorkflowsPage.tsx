@@ -209,7 +209,7 @@ export const WorkflowsPage = () => {
           </div>
           {live.length === 0 ? (
             <p className="muted">
-              Пока нет. Откройте workflow и добавьте триггер в левой колонке.
+              Пока нет. Откройте workflow и добавьте триггер.
             </p>
           ) : (
             <ul className="workflow-list">

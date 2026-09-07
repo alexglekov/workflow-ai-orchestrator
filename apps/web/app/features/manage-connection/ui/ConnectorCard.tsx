@@ -77,8 +77,12 @@ export const ConnectorCard = ({
     setLocalError(null);
 
     try {
-      await testConnection(id);
+      const result = await testConnection(id);
       await onRefresh();
+
+      if (result.status === 'error') {
+        setLocalError(result.lastError || 'Проверка не удалась');
+      }
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Проверка не удалась');
     } finally {
@@ -115,10 +119,12 @@ export const ConnectorCard = ({
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
         </span>
-        <span className="chip mcp">MCP</span>
-        <StatusBadge status={status} label={connectionStatusLabel(status)} />
-        <span className={`chevron ${expanded ? 'open' : ''}`}>
-          <Icon name="chevron" size={16} />
+        <span className="node-row-meta">
+          <span className="chip mcp">MCP</span>
+          <StatusBadge status={status} label={connectionStatusLabel(status)} />
+          <span className={`chevron ${expanded ? 'open' : ''}`}>
+            <Icon name="chevron" size={16} />
+          </span>
         </span>
       </button>
       {expanded ? (

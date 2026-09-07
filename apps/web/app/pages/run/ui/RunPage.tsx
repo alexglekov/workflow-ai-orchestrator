@@ -85,8 +85,14 @@ export const RunPage = () => {
 
   if (!run || run.id !== id) {
     return (
-      <div className="canvas-page">
-        <p className="muted">Загрузка запуска…</p>
+      <div className="canvas-page run-page">
+        <header className="canvas-chrome">
+          <Link to="/workflows" className="icon-btn" aria-label="К списку">
+            <Icon name="home" size={16} />
+          </Link>
+          <h1>Run</h1>
+        </header>
+        {error ? <Banner>{error}</Banner> : <p className="muted">Загрузка запуска…</p>}
       </div>
     );
   }

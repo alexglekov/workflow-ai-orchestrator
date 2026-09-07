@@ -107,6 +107,10 @@ export const http = async <T>(path: string, init?: RequestInit): Promise<T> => {
       throw new Error(fromApi);
     }
 
+    if (response.status === 404) {
+      throw new Error('Не найдено');
+    }
+
     if (response.status === 502 || response.status === 503) {
       throw new Error('API недоступен. Подождите секунду и обновите страницу.');
     }

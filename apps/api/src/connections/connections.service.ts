@@ -108,6 +108,12 @@ export class ConnectionsService {
   };
 
   remove = async (id: string) => {
+    const existing = await this.connections.findById(id);
+
+    if (!existing) {
+      throw new NotFoundException('Подключение не найдено');
+    }
+
     await this.connections.delete(id);
 
     return { ok: true };
@@ -127,10 +133,18 @@ export class ConnectionsService {
     }
 
     const key = this.key();
+    let result: { ok: boolean; message?: string; error?: string };
 
-    const result = await connector.testConnection(
-      decryptCredentials(existing, key),
-    );
+    try {
+      result = await connector.testConnection(
+        decryptCredentials(existing, key),
+      );
+    } catch (err) {
+      result = {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Ошибка подключения',
+      };
+    }
 
     const row = await this.connections.update(id, {
       status: result.ok ? 'connected' : 'error',

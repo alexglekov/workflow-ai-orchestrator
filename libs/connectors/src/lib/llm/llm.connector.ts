@@ -298,9 +298,15 @@ export const llmConnector: Connector = {
         message: `${llm.provider}/${llm.model}: ${text.slice(0, 80)}`,
       };
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'LLM connection failed';
+
       return {
         ok: false,
-        error: error instanceof Error ? error.message : 'LLM connection failed',
+        error:
+          message === 'fetch failed'
+            ? 'Не удалось достучаться до Gemini/Qwen. Проверьте ключ, сеть и QWEN_BASE_URL'
+            : message,
       };
     }
   },

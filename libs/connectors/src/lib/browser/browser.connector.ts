@@ -192,12 +192,14 @@ export const browserConnector: Connector = {
 
       return { ok: true, message: 'Chromium запускается' };
     } catch (error) {
+      const message =
+        error instanceof Error ? error.message : 'Не удалось запустить Chromium';
+
       return {
         ok: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : 'npx playwright install chromium',
+        error: /executable doesn't exist/i.test(message)
+          ? 'Chromium не установлен. На машине worker выполните npx playwright install chromium'
+          : message,
       };
     }
   },

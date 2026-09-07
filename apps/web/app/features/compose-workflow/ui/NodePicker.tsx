@@ -23,33 +23,37 @@ export const NodePicker = ({
         </button>
       </div>
       <div className="node-picker-list">
-        {catalog.map((item) => {
-          const visual = connectorVisual(item.id);
+        {catalog.length === 0 ? (
+          <p className="muted">Коннекторы не загрузились. Обновите страницу.</p>
+        ) : (
+          catalog.map((item) => {
+            const visual = connectorVisual(item.id);
 
-          return (
-            <button
-              key={item.id}
-              type="button"
-              className="node-pick"
-              onClick={() => onPick(item)}
-            >
-              <span
-                className="node-icon"
-                style={{ background: visual.bg, color: visual.color }}
+            return (
+              <button
+                key={item.id}
+                type="button"
+                className="node-pick"
+                onClick={() => onPick(item)}
               >
-                {visual.letter}
-              </span>
-              <span className="node-copy">
-                <strong>{item.name}</strong>
-                <span>{item.description}</span>
-              </span>
-              <span className="chip mcp">MCP</span>
-              <span className="muted">
-                <Icon name="chevron" size={16} />
-              </span>
-            </button>
-          );
-        })}
+                <span
+                  className="node-icon"
+                  style={{ background: visual.bg, color: visual.color }}
+                >
+                  {visual.letter}
+                </span>
+                <span className="node-copy">
+                  <strong>{item.name}</strong>
+                  <span>{item.description}</span>
+                </span>
+                <span className="chip mcp">MCP</span>
+                <span className="muted">
+                  <Icon name="chevron" size={16} />
+                </span>
+              </button>
+            );
+          })
+        )}
       </div>
     </div>
   </div>
