@@ -33,15 +33,17 @@ export const ConnectorsPage = () => {
   }, []);
 
   return (
-    <div className="canvas-page">
-      <div className="page">
-        <div className="panel" style={{ padding: 16 }}>
-          <div className="panel-head">
-            <strong>Коннекторы</strong>
-          </div>
-          {error ? <Banner>{error}</Banner> : null}
-          <div className="card-grid">
-            {catalog.map((connector) => (
+    <div className="canvas-page list-page">
+      <div className="list-shell">
+        <h1 className="list-title">Коннекторы</h1>
+        {error ? <Banner>{error}</Banner> : null}
+        <div className="card-grid">
+          {catalog.length === 0 ? (
+            <p className="muted">
+              Каталог пуст. Проверьте, что API запущен, и обновите страницу.
+            </p>
+          ) : (
+            catalog.map((connector) => (
               <ConnectorCard
                 key={connector.id}
                 connector={connector}
@@ -58,8 +60,8 @@ export const ConnectorsPage = () => {
                 onBusy={(value) => setBusyId(value ? connector.id : null)}
                 onRefresh={reload}
               />
-            ))}
-          </div>
+            ))
+          )}
         </div>
       </div>
     </div>

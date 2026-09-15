@@ -16,6 +16,8 @@ export interface Run {
   id: string;
   workflowId: string;
   status: 'pending' | 'running' | 'success' | 'error' | string;
+  source?: string;
+  input?: unknown;
   startedAt: string | null;
   finishedAt: string | null;
   steps: RunStep[];

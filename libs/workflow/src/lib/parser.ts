@@ -1,109 +1,12 @@
-import type { Connector } from '@ai-worker/connectors';
+import { completeLlm, resolveLlm, type Connector } from '@ai-worker/connectors';
+import { planFromCatalog, type PlanCatalogConnector } from './catalog-plan';
 import type { ParsedStep } from './types';
 
-const EXAMPLE_PROMPT =
-  'Взять новые заявки из почты, извлечь имя телефон компанию и сумму, создать запись в 1С, добавить строку в Excel и отправить уведомление в Telegram';
-
-export const fallbackParse = (prompt: string): ParsedStep[] => {
-  const text = prompt.toLowerCase();
-  const steps: ParsedStep[] = [];
-
-  const wantsMail = /почт|mail|email|письм|заявк/.test(text);
-  const wantsOneC = /1с|1c|onec/.test(text);
-  const wantsExcel = /excel|эксель|таблиц|xlsx/.test(text);
-  const wantsTelegram = /telegram|телеграм/.test(text);
-  const excelName =
-    prompt.match(/["«]([^"»]+\.xlsx?)["»]/i)?.[1] ||
-    prompt.match(/\b([\w.-]+\.xlsx?)\b/i)?.[1] ||
-    '';
-  const excelUrl = (
-    prompt.match(/https?:\/\/[^\s)\]>'"]+/i)?.[0] || ''
-  ).replace(/[.,;]+$/u, '');
-  const excelLink =
-    excelUrl &&
-    /xlsx|docs\.google|drive\.google|disk\.yandex|yadi\.sk/i.test(excelUrl)
-      ? excelUrl
-      : '';
-
-  if (wantsMail || steps.length === 0) {
-    steps.push({
-      title: 'Проверить новые письма с заявками',
-      connectorId: 'mail',
-      action: 'fetch_new',
-      params: { subjectContains: 'заявк', limit: 5 },
-    });
-  }
-
-  if (wantsOneC) {
-    steps.push({
-      title: 'Создать запись в 1С',
-      connectorId: 'onec',
-      action: 'create_record',
-      params: {},
-    });
-  }
-
-  if (wantsExcel) {
-    const fileName = excelName || undefined;
-    const fileUrl = excelLink || undefined;
-
-    if (fileUrl) {
-      steps.push({
-        title: 'Открыть Excel по ссылке',
-        connectorId: 'excel',
-        action: 'find_file',
-        params: { fileUrl },
-      });
-    } else if (/найти|диск|drive|яндекс|google/.test(text) || fileName) {
-      steps.push({
-        title: fileName
-          ? `Найти Excel «${fileName}»`
-          : 'Найти Excel по названию',
-        connectorId: 'excel',
-        action: 'find_file',
-        params: fileName ? { fileName } : {},
-      });
-    }
-
-    steps.push({
-      title: 'Добавить строку в Excel',
-      connectorId: 'excel',
-      action: 'append_row',
-      params: fileUrl ? { fileUrl } : fileName ? { fileName } : {},
-    });
-  }
-
-  if (wantsTelegram) {
-    steps.push({
-      title: 'Отправить уведомление в Telegram',
-      connectorId: 'telegram',
-      action: 'send_message',
-      params: {
-        text: 'Новая заявка: {{previous.name}}, {{previous.phone}}, {{previous.company}}, {{previous.amount}}',
-      },
-    });
-  }
-
-  if (steps.length === 0) {
-    return fallbackParse(EXAMPLE_PROMPT);
-  }
-
-  return steps.slice(0, 5);
-};
-
-export const parsePromptToSteps = async (
-  prompt: string,
-  connectors: Connector[],
-): Promise<ParsedStep[]> => {
-  const key = process.env['OPENAI_API_KEY'];
-
-  if (!key) {
-    return fallbackParse(prompt);
-  }
-
-  const catalog = connectors.map((connector) => ({
+const toPlanCatalog = (connectors: Connector[]): PlanCatalogConnector[] =>
+  connectors.map((connector) => ({
     id: connector.id,
     name: connector.name,
+    description: connector.description,
     actions: connector.actions.map((action) => ({
       id: action.id,
       name: action.name,
@@ -111,57 +14,176 @@ export const parsePromptToSteps = async (
     })),
   }));
 
+const catalogJson = (connectors: Connector[]) =>
+  connectors.map((connector) => ({
+    id: connector.id,
+    name: connector.name,
+    description: connector.description,
+    actions: connector.actions.map((action) => ({
+      id: action.id,
+      name: action.name,
+      description: action.description,
+      params: action.paramsSchema,
+    })),
+  }));
+
+export const fallbackParse = (
+  prompt: string,
+  connectors: Connector[] = [],
+): ParsedStep[] => {
+  if (connectors.length > 0) {
+    return planFromCatalog(prompt, toPlanCatalog(connectors));
+  }
+
+  return planFromCatalog(prompt, [
+    {
+      id: 'mail',
+      name: 'Mail',
+      actions: [
+        { id: 'fetch_new', name: 'Получить новые письма' },
+        { id: 'search', name: 'Найти письма' },
+        { id: 'send', name: 'Отправить письмо' },
+      ],
+    },
+    {
+      id: 'web',
+      name: 'Web',
+      actions: [
+        { id: 'search', name: 'Найти в вебе' },
+        { id: 'fetch', name: 'Открыть страницу' },
+        { id: 'rates', name: 'Курсы BestChange' },
+      ],
+    },
+    {
+      id: 'browser',
+      name: 'Browser',
+      actions: [{ id: 'open', name: 'Открыть страницу' }],
+    },
+    {
+      id: 'excel',
+      name: 'Excel',
+      actions: [
+        { id: 'find_file', name: 'Найти файл' },
+        { id: 'read_rows', name: 'Прочитать строки' },
+        { id: 'append_row', name: 'Добавить строку' },
+      ],
+    },
+    {
+      id: 'llm',
+      name: 'LLM',
+      actions: [
+        { id: 'extract', name: 'Извлечь поля' },
+        { id: 'classify', name: 'Классифицировать' },
+        { id: 'generate', name: 'Сгенерировать текст' },
+        { id: 'transcribe', name: 'Распознать речь' },
+        { id: 'speak', name: 'Озвучить текст' },
+      ],
+    },
+    {
+      id: 'transform',
+      name: 'Transform',
+      actions: [
+        { id: 'filter', name: 'Отфильтровать' },
+        { id: 'sort', name: 'Отсортировать' },
+        { id: 'pick', name: 'Выбрать поля' },
+        { id: 'join', name: 'Склеить список' },
+        { id: 'template', name: 'Собрать текст' },
+      ],
+    },
+    {
+      id: 'memory',
+      name: 'Memory',
+      actions: [
+        { id: 'get', name: 'Прочитать' },
+        { id: 'set', name: 'Записать' },
+      ],
+    },
+    {
+      id: 'onec',
+      name: '1С',
+      actions: [
+        { id: 'query', name: 'Найти записи' },
+        { id: 'get', name: 'Прочитать запись' },
+        { id: 'create_record', name: 'Создать запись' },
+        { id: 'update', name: 'Обновить запись' },
+      ],
+    },
+    {
+      id: 'telegram',
+      name: 'Telegram',
+      actions: [
+        { id: 'get_updates', name: 'Получить входящие' },
+        { id: 'send_message', name: 'Отправить сообщение' },
+        { id: 'send_voice', name: 'Отправить голосовое' },
+      ],
+    },
+    {
+      id: 'social',
+      name: 'Social',
+      actions: [
+        { id: 'followers', name: 'Подписчики' },
+        { id: 'reels', name: 'Рилсы' },
+      ],
+    },
+  ]);
+};
+
+export const parsePromptToSteps = async (
+  prompt: string,
+  connectors: Connector[],
+): Promise<ParsedStep[]> => {
+  const catalogFallback = () => fallbackParse(prompt, connectors);
+  const llm = resolveLlm();
+
+  if (!llm.apiKey) {
+    return catalogFallback();
+  }
+
   try {
-    const baseUrl =
-      process.env['OPENAI_BASE_URL'] || 'https://api.openai.com/v1';
-    const model = process.env['OPENAI_MODEL'] || 'gpt-4o-mini';
-    const response = await fetch(
-      `${baseUrl.replace(/\/+$/, '')}/chat/completions`,
-      {
-        method: 'POST',
-        headers: {
-          Authorization: `Bearer ${key}`,
-          'Content-Type': 'application/json',
+    const content = await completeLlm({
+      ...llm,
+      temperature: 0,
+      json: true,
+      messages: [
+        {
+          role: 'system',
+          content: `Ты планировщик workflow. Разложи задачу пользователя в шаги.
+Используй только действия из каталога. Выбери все действия, которые реально нужны по смыслу промпта, не только «типовую» цепочку почта→Excel→Telegram.
+Доступные коннекторы и параметры: ${JSON.stringify(catalogJson(connectors))}.
+Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{},"iterate":false}]}.
+Параметры бери из текста пользователя. Данные между шагами: {{previous.field}}, {{item.field}}, {{input.field}}, {{steps.1.field}}.
+iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates, social.followers, social.reels и onec.query без iterate.
+Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Instagram/VK/LinkedIn — social. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
         },
-        body: JSON.stringify({
-          model,
-          temperature: 0,
-          response_format: { type: 'json_object' },
-          messages: [
-            {
-              role: 'system',
-              content: `Ты планировщик workflow. Разложи задачу пользователя в 3-5 последовательных шагов.
-Доступные коннекторы: ${JSON.stringify(catalog)}.
-Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{}}]}.
-Передавай данные дальше через params с плейсхолдерами {{previous.field}}.`,
-            },
-            { role: 'user', content: prompt },
-          ],
-        }),
-      },
-    );
-
-    if (!response.ok) {
-      return fallbackParse(prompt);
-    }
-
-    const body = (await response.json()) as {
-      choices?: Array<{ message?: { content?: string } }>;
-    };
-    const content = body.choices?.[0]?.message?.content || '{}';
-    const parsed = JSON.parse(content) as { steps?: ParsedStep[] };
+        { role: 'user', content: prompt },
+      ],
+    });
+    const parsed = JSON.parse(content || '{}') as { steps?: ParsedStep[] };
 
     if (!Array.isArray(parsed.steps) || parsed.steps.length === 0) {
-      return fallbackParse(prompt);
+      return catalogFallback();
     }
 
-    return parsed.steps.slice(0, 5).map((step) => ({
-      title: step.title || `${step.connectorId}.${step.action}`,
-      connectorId: step.connectorId,
-      action: step.action,
-      params: step.params && typeof step.params === 'object' ? step.params : {},
-    }));
+    const allowed = new Map(
+      connectors.map((connector) => [
+        connector.id,
+        new Set(connector.actions.map((action) => action.id)),
+      ]),
+    );
+
+    const steps = parsed.steps
+      .filter((step) => allowed.get(step.connectorId)?.has(step.action))
+      .slice(0, 8)
+      .map((step) => ({
+        title: step.title || `${step.connectorId}.${step.action}`,
+        connectorId: step.connectorId,
+        action: step.action,
+        params: step.params && typeof step.params === 'object' ? step.params : {},
+        iterate: Boolean(step.iterate),
+      }));
+
+    return steps.length > 0 ? steps : catalogFallback();
   } catch {
-    return fallbackParse(prompt);
+    return catalogFallback();
   }
 };

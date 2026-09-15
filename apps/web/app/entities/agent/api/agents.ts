@@ -4,6 +4,8 @@ import type {
   AgentMessage,
   AgentPlanReply,
   AgentReply,
+  ChatPage,
+  WorkflowChat,
 } from '../model/types';
 
 export const toAgentHistory = (messages: AgentMessage[] = []) =>
@@ -12,6 +14,19 @@ export const toAgentHistory = (messages: AgentMessage[] = []) =>
     .map(({ role, content }) => ({ role, content }));
 
 export const fetchAgents = () => http<AgentCatalog>('/agents');
+
+export const fetchWorkflowChat = (workflowId: string) =>
+  http<WorkflowChat>(`/workflows/${workflowId}/chat`);
+
+export const fetchWorkflowChatPage = (
+  workflowId: string,
+  thread: 'ask' | 'build',
+  before: string,
+) => {
+  const query = new URLSearchParams({ thread, before });
+
+  return http<ChatPage>(`/workflows/${workflowId}/chat?${query.toString()}`);
+};
 
 export const askAgent = (payload: {
   message: string;

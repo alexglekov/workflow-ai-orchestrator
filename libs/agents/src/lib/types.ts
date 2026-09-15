@@ -12,11 +12,15 @@ export interface AgentMessage {
 export interface AgentCatalogItem {
   id: string;
   name: string;
+  description?: string;
   actions: Array<{
     id: string;
     name: string;
     description?: string;
-    params?: string[];
+    params?: Record<
+      string,
+      { type?: string; required?: boolean; description?: string }
+    >;
   }>;
 }
 
@@ -62,6 +66,7 @@ export interface AgentPlannedStep {
   connectorId: string;
   action: string;
   params: Record<string, unknown>;
+  iterate?: boolean;
 }
 
 export interface AgentPlanResult {

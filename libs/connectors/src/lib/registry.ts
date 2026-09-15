@@ -3,6 +3,12 @@ import { mailConnector } from './mail/mail.connector';
 import { telegramConnector } from './telegram/telegram.connector';
 import { oneCConnector } from './onec/onec.connector';
 import { excelConnector } from './excel/excel.connector';
+import { webConnector } from './web/web.connector';
+import { llmConnector } from './llm/llm.connector';
+import { transformConnector } from './transform/transform.connector';
+import { memoryConnector } from './memory/memory.connector';
+import { socialConnector } from './social/social.connector';
+import { browserConnector } from './browser/browser.connector';
 
 export class ConnectorRegistry {
   private readonly connectors = new Map<string, Connector>();
@@ -24,4 +30,10 @@ export const createDefaultRegistry = (): ConnectorRegistry =>
     telegramConnector,
     oneCConnector,
     excelConnector,
+    webConnector,
+    llmConnector,
+    transformConnector,
+    memoryConnector,
+    socialConnector,
+    browserConnector,
   ]);

@@ -5,6 +5,7 @@ import { WorkflowStepInput } from './workflow-step.input';
 
 const stepsInclude = {
   steps: { orderBy: { order: 'asc' as const } },
+  triggers: { orderBy: { createdAt: 'asc' as const } },
 };
 
 const toStepCreates = (steps: WorkflowStepInput[]) =>
@@ -15,6 +16,7 @@ const toStepCreates = (steps: WorkflowStepInput[]) =>
     action: step.action,
     params: (step.params ?? {}) as Prisma.InputJsonValue,
     connectionId: step.connectionId || null,
+    iterate: Boolean(step.iterate),
   }));
 
 @Injectable()

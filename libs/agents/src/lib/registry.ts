@@ -1,4 +1,7 @@
-import { OrchestratorAgent } from './providers/orchestrator.provider';
+import {
+  NO_AGENT_ERROR,
+  OrchestratorAgent,
+} from './providers/orchestrator.provider';
 import type { AgentCapability, AgentInfo, AgentProvider } from './types';
 
 export class AgentRegistry {
@@ -42,12 +45,17 @@ export class AgentRegistry {
       return requested;
     }
 
-    const local = this.get('local');
+    const fallback = this.list().find(
+      (agent) =>
+        agent.id !== 'orchestrator' &&
+        agent.available() &&
+        agent.capabilities.includes(capability),
+    );
 
-    if (!local) {
-      throw new Error('Не найден локальный агент');
+    if (!fallback) {
+      throw new Error(NO_AGENT_ERROR);
     }
 
-    return local;
+    return fallback;
   };
 }

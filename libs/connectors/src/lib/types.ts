@@ -25,11 +25,22 @@ export interface ConnectorAction {
   paramsSchema: Record<string, ConnectorActionParam>;
 }
 
+import type { TemplateContext } from './interpolate';
+
+export type ConnectorRuntime = {
+  workflowId?: string;
+  getState?: (key: string) => Promise<unknown>;
+  setState?: (key: string, value: unknown) => Promise<void>;
+};
+
 export interface ConnectorExecuteInput {
   action: string;
   params: Record<string, unknown>;
   previousResult: unknown;
   credentials: Record<string, string>;
+  context?: TemplateContext;
+  runtime?: ConnectorRuntime;
+  signal?: AbortSignal;
 }
 
 export interface ConnectorExecuteResult {

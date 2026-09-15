@@ -22,6 +22,7 @@ export const updateWorkflow = (
       action: string;
       params?: Record<string, unknown>;
       connectionId?: string;
+      iterate?: boolean;
     }>;
   },
 ) =>
@@ -35,6 +36,9 @@ export const parseWorkflow = (id: string, prompt: string) =>
     method: 'POST',
     body: JSON.stringify({ prompt }),
   });
+
+export const createDemoWorkflow = () =>
+  http<Workflow>('/workflows/demo', { method: 'POST' });
 
 export const deleteWorkflow = (id: string) =>
   http<void>(`/workflows/${id}`, { method: 'DELETE' });

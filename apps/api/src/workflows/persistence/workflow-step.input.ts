@@ -4,4 +4,5 @@ export type WorkflowStepInput = {
   action: string;
   params?: Record<string, unknown>;
   connectionId?: string | null;
+  iterate?: boolean;
 };

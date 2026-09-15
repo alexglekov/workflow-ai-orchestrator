@@ -1,15 +1,10 @@
 import { AgentRegistry } from './registry';
 import { GeminiAgent } from './providers/gemini.provider';
-import { LocalAgent } from './providers/local.provider';
-import { OpenAiAgent } from './providers/openai.provider';
+import { QwenAgent } from './providers/qwen.provider';
 import { OrchestratorAgent } from './providers/orchestrator.provider';
 
 export const createDefaultRegistry = (): AgentRegistry => {
-  const registry = new AgentRegistry([
-    new GeminiAgent(),
-    new OpenAiAgent(),
-    new LocalAgent(),
-  ]);
+  const registry = new AgentRegistry([new GeminiAgent(), new QwenAgent()]);
 
   registry.register(new OrchestratorAgent(registry));
 

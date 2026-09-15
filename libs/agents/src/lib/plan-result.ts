@@ -22,6 +22,7 @@ const asSteps = (value: unknown): AgentPlannedStep[] => {
         action: String(step.action || ''),
         params:
           step.params && typeof step.params === 'object' ? step.params : {},
+        iterate: Boolean(step.iterate),
       };
     })
     .filter((step) => step.connectorId && step.action)
@@ -82,6 +83,34 @@ export const parsePlanResponse = (
   }
 };
 
+const compact = (value: string) => value.toLowerCase().replace(/[^a-z0-9]/g, '');
+
+const resolveAction = (action: string, allowed: Set<string>): string | null => {
+  if (allowed.has(action)) {
+    return action;
+  }
+
+  const needle = compact(action);
+
+  if (!needle) {
+    return null;
+  }
+
+  const exact = [...allowed].find((id) => compact(id) === needle);
+
+  if (exact) {
+    return exact;
+  }
+
+  const partial = [...allowed].find((id) => {
+    const idc = compact(id);
+
+    return idc.includes(needle) || needle.includes(idc);
+  });
+
+  return partial ?? null;
+};
+
 export const sanitizePlan = (
   plan: AgentPlanResult,
   context: AgentContext,
@@ -92,9 +121,21 @@ export const sanitizePlan = (
       new Set(connector.actions.map((action) => action.id)),
     ]),
   );
-  const steps = plan.steps.filter((step) =>
-    allowed.get(step.connectorId)?.has(step.action),
-  );
+  const steps = plan.steps.flatMap((step) => {
+    const actions = allowed.get(step.connectorId);
+
+    if (!actions) {
+      return [];
+    }
+
+    const action = resolveAction(step.action, actions);
+
+    if (!action) {
+      return [];
+    }
+
+    return [{ ...step, action }];
+  });
   const connectors = [...new Set(steps.map((step) => step.connectorId))];
 
   if (plan.kind === 'questions') {

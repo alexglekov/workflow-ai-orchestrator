@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link, useNavigate, useParams } from 'react-router';
 import { useAtom } from 'jotai';
 import {
   askAgent,
   fetchAgents,
+  fetchWorkflowChat,
+  fetchWorkflowChatPage,
   planAgent,
   type AgentMessage,
   type AgentProviderInfo,
@@ -17,6 +19,14 @@ import {
 } from '~/entities/connector';
 import { startRun } from '~/entities/run';
 import {
+  createTrigger,
+  deleteTrigger,
+  fetchTriggers,
+  updateTrigger,
+  type TriggerType,
+  type WorkflowTrigger,
+} from '~/entities/trigger';
+import {
   fetchWorkflow,
   updateWorkflow,
   workflowAtom,
@@ -26,7 +36,10 @@ import {
   AskThread,
   NodePicker,
   PromptForm,
+  RunInputDialog,
   StepsEditor,
+  TriggerPanel,
+  TriggerPicker,
 } from '~/features/compose-workflow';
 import { errorAtom, loadingAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
@@ -43,16 +56,29 @@ export const WorkflowEditorPage = () => {
   const [prompt, setPrompt] = useState('');
   const [name, setName] = useState('');
   const [pickerOpen, setPickerOpen] = useState(false);
+  const [triggerPickerOpen, setTriggerPickerOpen] = useState(false);
+  const [triggerPickerType, setTriggerPickerType] =
+    useState<TriggerType>('schedule');
+  const [runDialogOpen, setRunDialogOpen] = useState(false);
+  const [runInput, setRunInput] = useState('{}');
+  const [triggers, setTriggers] = useState<WorkflowTrigger[]>([]);
   const [mode, setMode] = useState<ComposerMode>('build');
   const [askDraft, setAskDraft] = useState('');
   const [askMessages, setAskMessages] = useState<AgentMessage[]>([]);
+  const [askHasMore, setAskHasMore] = useState(false);
+  const [askLoadingMore, setAskLoadingMore] = useState(false);
   const [asking, setAsking] = useState(false);
   const [planDraft, setPlanDraft] = useState('');
   const [buildMessages, setBuildMessages] = useState<AgentMessage[]>([]);
+  const [buildHasMore, setBuildHasMore] = useState(false);
+  const [buildLoadingMore, setBuildLoadingMore] = useState(false);
   const [planning, setPlanning] = useState(false);
   const [providers, setProviders] = useState<AgentProviderInfo[]>([]);
   const [providerId, setProviderId] = useState('gemini');
-  const persistTimer = useRef<ReturnType<typeof setTimeout>>();
+  const [mobileTab, setMobileTab] = useState<'triggers' | 'chat' | 'flow'>(
+    'chat',
+  );
+  const persistTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const persistGen = useRef(0);
   const nameRef = useRef(name);
   const promptRef = useRef(prompt);
@@ -78,14 +104,18 @@ export const WorkflowEditorPage = () => {
       setWorkflow(null);
 
       try {
-        const [nextWorkflow, nextCatalog, nextConnections, nextAgents] =
+        const [nextWorkflow, nextCatalog, nextConnections, nextAgents, nextChat] =
           await Promise.all([
             fetchWorkflow(id),
             fetchCatalog(),
             fetchConnections(),
             fetchAgents().catch(() => ({
-              active: 'local',
+              active: 'gemini',
               providers: [],
+            })),
+            fetchWorkflowChat(id).catch(() => ({
+              ask: { messages: [], hasMore: false },
+              build: { messages: [], hasMore: false },
             })),
           ]);
 
@@ -93,14 +123,19 @@ export const WorkflowEditorPage = () => {
         setCatalog(nextCatalog);
         setConnections(nextConnections);
         setProviders(nextAgents.providers);
-        setProviderId('gemini');
+        setProviderId(nextAgents.active || 'gemini');
         setPrompt(nextWorkflow.prompt);
         setName(nextWorkflow.name);
+        setTriggers(await fetchTriggers(id).catch(() => []));
         setMode('build');
         setAskDraft('');
-        setAskMessages([]);
+        setAskMessages(nextChat.ask.messages);
+        setAskHasMore(nextChat.ask.hasMore);
+        setAskLoadingMore(false);
         setPlanDraft('');
-        setBuildMessages([]);
+        setBuildMessages(nextChat.build.messages);
+        setBuildHasMore(nextChat.build.hasMore);
+        setBuildLoadingMore(false);
         setError(null);
       } catch (err) {
         setError(
@@ -109,6 +144,78 @@ export const WorkflowEditorPage = () => {
       }
     })();
   }, [id, setCatalog, setConnections, setError, setWorkflow]);
+
+  useEffect(() => {
+    const hasFlow =
+      Boolean(workflow?.steps.length) || triggers.length > 0;
+
+    if (!hasFlow && mobileTab === 'flow') {
+      setMobileTab('chat');
+    }
+  }, [workflow, triggers.length, mobileTab]);
+
+  const loadOlderChat = useCallback(async () => {
+    if (!id) {
+      return;
+    }
+
+    const thread = mode === 'ask' ? 'ask' : 'build';
+    const loading = thread === 'ask' ? askLoadingMore : buildLoadingMore;
+    const more = thread === 'ask' ? askHasMore : buildHasMore;
+    const list = thread === 'ask' ? askMessages : buildMessages;
+    const before = list.find((item) => item.id)?.id;
+
+    if (loading || !more || !before) {
+      return;
+    }
+
+    if (thread === 'ask') {
+      setAskLoadingMore(true);
+    } else {
+      setBuildLoadingMore(true);
+    }
+
+    try {
+      const page = await fetchWorkflowChatPage(id, thread, before);
+      const merge = (current: AgentMessage[]) => {
+        const seen = new Set(current.map((item) => item.id).filter(Boolean));
+
+        return [
+          ...page.messages.filter((item) => !item.id || !seen.has(item.id)),
+          ...current,
+        ];
+      };
+
+      if (thread === 'ask') {
+        setAskMessages(merge);
+        setAskHasMore(page.hasMore);
+      } else {
+        setBuildMessages(merge);
+        setBuildHasMore(page.hasMore);
+      }
+    } catch {
+      if (thread === 'ask') {
+        setAskHasMore(false);
+      } else {
+        setBuildHasMore(false);
+      }
+    } finally {
+      if (thread === 'ask') {
+        setAskLoadingMore(false);
+      } else {
+        setBuildLoadingMore(false);
+      }
+    }
+  }, [
+    id,
+    mode,
+    askLoadingMore,
+    buildLoadingMore,
+    askHasMore,
+    buildHasMore,
+    askMessages,
+    buildMessages,
+  ]);
 
   if (!workflow) {
     return (
@@ -147,7 +254,8 @@ export const WorkflowEditorPage = () => {
           connectorId: step.connectorId,
           action: step.action,
           params: step.params,
-          connectionId: step.connectionId ?? undefined,
+                          connectionId: step.connectionId ?? undefined,
+                          iterate: Boolean(step.iterate),
         })),
       });
 
@@ -349,6 +457,7 @@ export const WorkflowEditorPage = () => {
     const action = connector.actions[0];
 
     setPickerOpen(false);
+    setMobileTab('flow');
     replaceSteps(
       [
         ...current.steps,
@@ -360,13 +469,99 @@ export const WorkflowEditorPage = () => {
           action: action?.id || '',
           params: {},
           connectionId: null,
+          iterate: false,
         },
       ],
       true,
     );
   };
 
-  const run = async () => {
+  const openTriggerPicker = (type: TriggerType = 'schedule') => {
+    setTriggerPickerType(type);
+    setTriggerPickerOpen(true);
+  };
+
+  const addTrigger = async (
+    type: TriggerType,
+    everyMinutes?: number,
+    at?: string,
+    timezone?: string,
+  ) => {
+    if (!id) {
+      return;
+    }
+
+    setTriggerPickerOpen(false);
+
+    try {
+      const created = await createTrigger(id, {
+        type,
+        everyMinutes,
+        at,
+        timezone,
+      });
+
+      setTriggers((current) => [...current, created]);
+      setMobileTab('triggers');
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось добавить триггер');
+    }
+  };
+
+  const changeTriggerTiming = async (
+    triggerId: string,
+    everyMinutes: number,
+    at: string,
+    timezone: string,
+  ) => {
+    try {
+      const next = await updateTrigger(triggerId, {
+        everyMinutes,
+        at: at || null,
+        timezone: at ? timezone : undefined,
+      });
+
+      setTriggers((current) =>
+        current.map((item) =>
+          item.id === triggerId
+            ? { ...item, ...next, webhookUrl: item.webhookUrl }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(
+        err instanceof Error ? err.message : 'Не удалось обновить расписание',
+      );
+    }
+  };
+
+  const toggleTrigger = async (triggerId: string, enabled: boolean) => {
+    try {
+      const next = await updateTrigger(triggerId, { enabled });
+
+      setTriggers((current) =>
+        current.map((item) =>
+          item.id === triggerId
+            ? { ...item, ...next, webhookUrl: item.webhookUrl }
+            : item,
+        ),
+      );
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось обновить триггер');
+    }
+  };
+
+  const removeTrigger = async (triggerId: string) => {
+    try {
+      await deleteTrigger(triggerId);
+      setTriggers((current) => current.filter((item) => item.id !== triggerId));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось удалить триггер');
+    }
+  };
+
+  const run = async (inputOverride?: Record<string, unknown>) => {
     if (!id) {
       return;
     }
@@ -375,11 +570,22 @@ export const WorkflowEditorPage = () => {
 
     try {
       await persist(workflowRef.current?.steps ?? workflow.steps);
-      const created = await startRun(id);
+      let input: Record<string, unknown> = inputOverride ?? {};
+
+      if (inputOverride === undefined) {
+        try {
+          input = JSON.parse(runInput || '{}') as Record<string, unknown>;
+        } catch {
+          throw new Error('Input должен быть JSON-объектом');
+        }
+      }
+
+      const created = await startRun(id, input);
 
       navigate(`/runs/${created.id}`);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось запустить');
+    } finally {
       setLoading(false);
     }
   };
@@ -391,11 +597,9 @@ export const WorkflowEditorPage = () => {
   };
 
   const empty = workflow.steps.length === 0;
+  const showFlow = !empty || triggers.length > 0;
   const buildFollowUp = buildMessages.length > 0;
   const composerBusy = mode === 'ask' ? asking : planning;
-  const chatting =
-    composerBusy ||
-    (mode === 'ask' ? askMessages : buildMessages).length > 0;
   const composerValue =
     mode === 'ask' ? askDraft : buildFollowUp ? planDraft : prompt;
   const changeComposer = (value: string) => {
@@ -414,21 +618,14 @@ export const WorkflowEditorPage = () => {
 
   return (
     <div
-      className={`canvas-page${empty ? '' : ' with-flow'}${chatting ? ' has-chat' : ''}`}
+      className={`canvas-page editor-page${empty ? ' is-empty' : ''}`}
+      data-mobile-tab={mobileTab}
     >
-      <button
-        type="button"
-        className="fab"
-        onClick={() => setPickerOpen(true)}
-        aria-label="Добавить коннектор"
-      >
-        <Icon name="plus" size={22} />
-      </button>
-      <div className="canvas-chrome">
+      <header className="canvas-chrome">
         <Link
           to="/workflows"
           className="icon-btn"
-          aria-label="На главную"
+          aria-label="К списку"
           onClick={() =>
             void persist(
               workflowRef.current?.steps ?? workflow.steps,
@@ -453,81 +650,178 @@ export const WorkflowEditorPage = () => {
         <div className="chrome-actions">
           <button
             type="button"
-            className="play-btn"
-            onClick={() => void run()}
-            disabled={loading || empty}
-            aria-label="Запустить"
+            className="icon-btn"
+            onClick={() => setPickerOpen(true)}
+            aria-label="Добавить шаг"
           >
-            <Icon name="play" size={14} />
+            <Icon name="plus" size={16} />
+          </button>
+          <button
+            type="button"
+            className="icon-btn"
+            onClick={() => openTriggerPicker('schedule')}
+            aria-label="Добавить триггер"
+          >
+            <Icon name="clock" size={16} />
+          </button>
+          <button
+            type="button"
+            className="play-btn labeled"
+            onClick={(event) => {
+              if (event.shiftKey) {
+                setRunDialogOpen(true);
+                return;
+              }
+
+              void run({});
+            }}
+            disabled={loading || empty}
+            title="Запуск. Shift+клик — с JSON input"
+          >
+            <Icon name="play" size={13} />
+            <span className="play-label">Run</span>
           </button>
         </div>
-      </div>
+      </header>
       {error ? <Banner>{error}</Banner> : null}
-      <div className="canvas-workspace">
-        <section className="canvas-chat">
-          <AskThread
-            messages={mode === 'ask' ? askMessages : buildMessages}
-            loading={mode === 'ask' ? asking : planning}
-          />
-          <PromptForm
-            mode={mode}
-            prompt={composerValue}
-            loading={composerBusy}
-            providers={providers}
-            providerId={providerId}
-            onModeChange={setMode}
-            onPromptChange={changeComposer}
-            onProviderChange={setProviderId}
-            onSubmit={() => void (mode === 'ask' ? ask() : plan())}
-            placeholder={
-              mode === 'ask'
-                ? undefined
-                : buildFollowUp
-                  ? 'Ответьте на уточняющие вопросы агента'
-                  : undefined
-            }
-          />
-          {empty && mode === 'build' && !buildFollowUp ? (
-            <>
-              <div className="or-row">OR</div>
-              <div className="start-tiles">
-                <button
-                  type="button"
-                  className="start-tile"
-                  onClick={() => setPickerOpen(true)}
-                >
-                  <span className="tile-icon green">
-                    <Icon name="target" size={18} />
-                  </span>
-                  <strong>Начать с триггера</strong>
-                </button>
-                <Link to="/connectors" className="start-tile">
-                  <span className="tile-icon blue">
-                    <Icon name="blocks" size={16} />
-                  </span>
-                  <strong>Начать с коннектора</strong>
-                </Link>
-              </div>
-            </>
+      <nav className="editor-tabs" aria-label="Разделы редактора">
+        <button
+          type="button"
+          className={mobileTab === 'triggers' ? 'active' : ''}
+          onClick={() => setMobileTab('triggers')}
+        >
+          Триггеры
+          {triggers.length ? (
+            <span className="tab-count">{triggers.length}</span>
           ) : null}
-        </section>
-        {empty ? null : (
+        </button>
+        <button
+          type="button"
+          className={mobileTab === 'chat' ? 'active' : ''}
+          onClick={() => setMobileTab('chat')}
+        >
+          Чат
+        </button>
+        <button
+          type="button"
+          className={mobileTab === 'flow' ? 'active' : ''}
+          disabled={!showFlow}
+          onClick={() => setMobileTab('flow')}
+        >
+          Схема
+          {workflow.steps.length ? (
+            <span className="tab-count">{workflow.steps.length}</span>
+          ) : null}
+        </button>
+      </nav>
+      <div className="editor-body">
+        <TriggerPanel
+          triggers={triggers}
+          onOpenPicker={openTriggerPicker}
+          onToggle={(triggerId, enabled) =>
+            void toggleTrigger(triggerId, enabled)
+          }
+          onRemove={(triggerId) => void removeTrigger(triggerId)}
+          onTiming={(triggerId, everyMinutes, at, timezone) =>
+            void changeTriggerTiming(triggerId, everyMinutes, at, timezone)
+          }
+        />
+        <div className={`editor-main${empty ? ' is-empty' : ''}`}>
+          {empty && triggers.length === 0 ? (
+            <div className="editor-hero">
+              {mode === 'build' && !buildFollowUp ? (
+                <div className="start-tiles">
+                  <button
+                    type="button"
+                    className="start-tile"
+                    onClick={() => openTriggerPicker('schedule')}
+                  >
+                    <span className="tile-icon green">
+                      <Icon name="target" size={18} />
+                    </span>
+                    <strong>Начать с триггера</strong>
+                  </button>
+                  <button
+                    type="button"
+                    className="start-tile"
+                    onClick={() => setPickerOpen(true)}
+                  >
+                    <span className="tile-icon blue">
+                      <Icon name="blocks" size={16} />
+                    </span>
+                    <strong>Добавить шаг</strong>
+                  </button>
+                </div>
+              ) : null}
+            </div>
+          ) : null}
+          <div className="composer-dock">
+            <AskThread
+              messages={mode === 'ask' ? askMessages : buildMessages}
+              loading={mode === 'ask' ? asking : planning}
+              hasMore={mode === 'ask' ? askHasMore : buildHasMore}
+              loadingMore={mode === 'ask' ? askLoadingMore : buildLoadingMore}
+              onLoadOlder={loadOlderChat}
+            />
+            <PromptForm
+              mode={mode}
+              prompt={composerValue}
+              loading={composerBusy}
+              providers={providers}
+              providerId={providerId}
+              onModeChange={setMode}
+              onPromptChange={changeComposer}
+              onProviderChange={setProviderId}
+              onSubmit={() => void (mode === 'ask' ? ask() : plan())}
+              placeholder={
+                mode === 'ask'
+                  ? undefined
+                  : buildFollowUp
+                    ? 'Ответьте на уточняющие вопросы агента'
+                    : undefined
+              }
+            />
+          </div>
+        </div>
+        {showFlow ? (
           <section className="canvas-flow">
             <StepsEditor
               steps={workflow.steps}
+              triggers={triggers}
               catalog={catalog}
               connections={connections}
               onChange={updateStep}
               onRemove={removeStep}
             />
           </section>
-        )}
+        ) : null}
       </div>
       {pickerOpen ? (
         <NodePicker
           catalog={catalog}
           onClose={() => setPickerOpen(false)}
           onPick={(connector) => void addNode(connector)}
+        />
+      ) : null}
+      {triggerPickerOpen ? (
+        <TriggerPicker
+          key={triggerPickerType}
+          initialType={triggerPickerType}
+          onClose={() => setTriggerPickerOpen(false)}
+          onPick={(type, everyMinutes, at, timezone) =>
+            void addTrigger(type, everyMinutes, at, timezone)
+          }
+        />
+      ) : null}
+      {runDialogOpen ? (
+        <RunInputDialog
+          value={runInput}
+          onChange={setRunInput}
+          onCancel={() => setRunDialogOpen(false)}
+          onRun={() => {
+            setRunDialogOpen(false);
+            void run();
+          }}
         />
       ) : null}
     </div>

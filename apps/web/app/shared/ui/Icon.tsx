@@ -10,7 +10,10 @@ type IconName =
   | 'target'
   | 'blocks'
   | 'spark'
-  | 'trash';
+  | 'trash'
+  | 'clock'
+  | 'link'
+  | 'refresh';
 
 export const Icon = ({
   name,
@@ -86,6 +89,25 @@ export const Icon = ({
         <path d="M6.5 7l.8 12.2A1.8 1.8 0 0 0 9.1 21h5.8a1.8 1.8 0 0 0 1.8-1.8L17.5 7" />
         <path d="M10 11v6" />
         <path d="M14 11v6" />
+      </>
+    ) : null}
+    {name === 'clock' ? (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v4.2L15 15" />
+      </>
+    ) : null}
+    {name === 'link' ? (
+      <>
+        <path d="M9.5 14.5 7.8 16.2a3 3 0 0 1-4.2-4.2l2.5-2.5a3 3 0 0 1 4.2 0" />
+        <path d="M14.5 9.5 16.2 7.8a3 3 0 0 1 4.2 4.2l-2.5 2.5a3 3 0 0 1-4.2 0" />
+        <path d="m9 15 6-6" />
+      </>
+    ) : null}
+    {name === 'refresh' ? (
+      <>
+        <path d="M20 12a8 8 0 1 1-2.2-5.5" />
+        <path d="M20 5v5h-5" />
       </>
     ) : null}
   </svg>

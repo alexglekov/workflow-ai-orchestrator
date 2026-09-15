@@ -9,7 +9,10 @@ import type {
   AgentReply,
 } from '../types';
 
-const FALLBACK_ORDER = ['gemini', 'openai', 'local'] as const;
+const FALLBACK_ORDER = ['gemini', 'qwen'] as const;
+
+export const NO_AGENT_ERROR =
+  'Нет доступного агента. Задайте GEMINI_API_KEY или QWEN_API_KEY.';
 
 export class OrchestratorAgent implements AgentProvider {
   id = 'orchestrator';
@@ -63,12 +66,6 @@ export class OrchestratorAgent implements AgentProvider {
       }
     }
 
-    const local = this.agents.get('local');
-
-    if (!local) {
-      throw new Error('Не найден локальный агент');
-    }
-
-    return local;
+    throw new Error(NO_AGENT_ERROR);
   };
 }

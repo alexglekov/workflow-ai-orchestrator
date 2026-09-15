@@ -19,13 +19,16 @@ model Connection {
 }
 
 model Workflow {
-  id        String         @id @default(uuid())
+  id        String          @id @default(uuid())
   name      String
-  prompt    String         @default("")
+  prompt    String          @default("")
   steps     WorkflowStep[]
   runs      Run[]
-  createdAt DateTime       @default(now())
-  updatedAt DateTime       @updatedAt
+  triggers  Trigger[]
+  state     WorkflowState[]
+  chat      WorkflowChatMessage[]
+  createdAt DateTime        @default(now())
+  updatedAt DateTime        @updatedAt
 }
 
 model WorkflowStep {
@@ -38,19 +41,45 @@ model WorkflowStep {
   action       String
   params       Json     @default("{}")
   connectionId String?
+  iterate      Boolean  @default(false)
 
   @@index([workflowId, order])
 }
 
+model Trigger {
+  id          String    @id @default(uuid())
+  workflowId  String
+  workflow    Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  type        String
+  enabled     Boolean   @default(true)
+  config      Json      @default("{}")
+  token       String?   @unique
+  lastFiredAt DateTime?
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  @@index([workflowId])
+  @@index([enabled, type])
+}
+
 model Run {
-  id         String    @id @default(uuid())
-  workflowId String
-  workflow   Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
-  status     String    @default("pending")
-  startedAt  DateTime?
-  finishedAt DateTime?
-  steps      RunStep[]
-  createdAt  DateTime  @default(now())
+  id               String    @id @default(uuid())
+  workflowId       String
+  workflow         Workflow  @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  status           String    @default("pending")
+  source           String    @default("manual")
+  triggerId        String?
+  input            Json?
+  lockedAt         DateTime?
+  lockedBy         String?
+  cancelRequested  Boolean   @default(false)
+  startedAt        DateTime?
+  finishedAt       DateTime?
+  steps            RunStep[]
+  createdAt        DateTime  @default(now())
+
+  @@index([status, createdAt])
+  @@index([workflowId, status])
 }
 
 model RunStep {
@@ -70,4 +99,29 @@ model RunStep {
   finishedAt     DateTime?
 
   @@index([runId, order])
+}
+
+model WorkflowState {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  key        String
+  value      Json
+  updatedAt  DateTime @updatedAt
+
+  @@unique([workflowId, key])
+  @@index([workflowId])
+}
+
+model WorkflowChatMessage {
+  id         String   @id @default(uuid())
+  workflowId String
+  workflow   Workflow @relation(fields: [workflowId], references: [id], onDelete: Cascade)
+  thread     String
+  role       String
+  content    String
+  status     String?
+  createdAt  DateTime @default(now())
+
+  @@index([workflowId, thread, createdAt])
 }

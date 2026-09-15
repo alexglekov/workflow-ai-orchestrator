@@ -1,4 +1,8 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import {
+  Injectable,
+  InternalServerErrorException,
+  NotFoundException,
+} from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { encryptJson } from '@ai-worker/data-access';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
@@ -22,12 +26,32 @@ export class ConnectionsService {
   private key = () => encryptionKey(this.config);
 
   list = async () => {
-    const key = this.key();
-    const rows = await this.connections.findAll();
+    try {
+      const rows = await this.connections.findAll();
 
-    return rows.map((row) =>
-      toPublicConnection(row, key, secretKeys(this.connectors, row.connectorId)),
-    );
+      if (!rows.length) {
+        return [];
+      }
+
+      const key = this.key();
+
+      return rows.map((row) =>
+        toPublicConnection(
+          row,
+          key,
+          secretKeys(this.connectors, row.connectorId),
+        ),
+      );
+    } catch (err) {
+      if (err instanceof InternalServerErrorException) {
+        throw err;
+      }
+
+      const message =
+        err instanceof Error ? err.message : 'Не удалось загрузить подключения';
+
+      throw new InternalServerErrorException(message);
+    }
   };
 
   create = async (dto: CreateConnectionDto) => {
@@ -84,6 +108,12 @@ export class ConnectionsService {
   };
 
   remove = async (id: string) => {
+    const existing = await this.connections.findById(id);
+
+    if (!existing) {
+      throw new NotFoundException('Подключение не найдено');
+    }
+
     await this.connections.delete(id);
 
     return { ok: true };
@@ -103,10 +133,18 @@ export class ConnectionsService {
     }
 
     const key = this.key();
+    let result: { ok: boolean; message?: string; error?: string };
 
-    const result = await connector.testConnection(
-      decryptCredentials(existing, key),
-    );
+    try {
+      result = await connector.testConnection(
+        decryptCredentials(existing, key),
+      );
+    } catch (err) {
+      result = {
+        ok: false,
+        error: err instanceof Error ? err.message : 'Ошибка подключения',
+      };
+    }
 
     const row = await this.connections.update(id, {
       status: result.ok ? 'connected' : 'error',
@@ -121,6 +159,12 @@ export class ConnectionsService {
       ),
       testMessage: result.message,
     };
+  };
+
+  soleId = async (connectorId: string) => {
+    const rows = await this.connections.findByConnector(connectorId);
+
+    return rows.length === 1 ? rows[0].id : null;
   };
 
   resolveCredentials = async (

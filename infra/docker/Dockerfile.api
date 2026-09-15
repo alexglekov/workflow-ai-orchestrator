@@ -1,0 +1,41 @@
+# Базовый образ общий с воркером: web.search умеет искать через Chromium,
+# поэтому проверка подключения в API работает так же, как реальный запуск.
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS build
+
+WORKDIR /app
+
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY package.json package-lock.json nx.json tsconfig.base.json ./
+COPY apps/api ./apps/api
+COPY apps/worker ./apps/worker
+COPY libs ./libs
+
+RUN npm ci
+
+RUN npx nx build api --configuration=production
+
+FROM mcr.microsoft.com/playwright:v1.62.1-noble AS api
+
+WORKDIR /app
+ENV NODE_ENV=production
+ENV PLAYWRIGHT_BROWSERS_PATH=/ms-playwright
+
+# ffmpeg перекодирует WAV из Qwen TTS в OGG/Opus — иначе Telegram не примет голосовое.
+RUN apt-get update \
+  && apt-get install -y --no-install-recommends openssl ca-certificates ffmpeg \
+  && rm -rf /var/lib/apt/lists/*
+
+COPY --from=build /app/node_modules ./node_modules
+COPY --from=build /app/package.json /app/package-lock.json ./
+COPY --from=build /app/dist/apps/api ./dist/apps/api
+COPY --from=build /app/libs/data-access/prisma ./libs/data-access/prisma
+COPY infra/docker/api-entrypoint.sh ./infra/docker/api-entrypoint.sh
+
+RUN chmod +x ./infra/docker/api-entrypoint.sh
+
+EXPOSE 3000
+
+CMD ["./infra/docker/api-entrypoint.sh"]

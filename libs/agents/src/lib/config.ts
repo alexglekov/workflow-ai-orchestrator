@@ -5,8 +5,9 @@ export const agentConfig = {
   geminiBaseUrl: () =>
     process.env['GEMINI_BASE_URL'] ||
     'https://generativelanguage.googleapis.com/v1beta',
-  openaiKey: () => process.env['OPENAI_API_KEY'] || '',
-  openaiModel: () => process.env['OPENAI_MODEL'] || 'gpt-4o-mini',
-  openaiBaseUrl: () =>
-    process.env['OPENAI_BASE_URL'] || 'https://api.openai.com/v1',
+  qwenKey: () => process.env['QWEN_API_KEY'] || '',
+  qwenModel: () => process.env['QWEN_MODEL'] || 'qwen-plus',
+  qwenBaseUrl: () =>
+    process.env['QWEN_BASE_URL'] ||
+    'https://dashscope-intl.aliyuncs.com/compatible-mode/v1',
 };

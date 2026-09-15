@@ -77,8 +77,12 @@ export const ConnectorCard = ({
     setLocalError(null);
 
     try {
-      await testConnection(id);
+      const result = await testConnection(id);
       await onRefresh();
+
+      if (result.status === 'error') {
+        setLocalError(result.lastError || 'Проверка не удалась');
+      }
     } catch (err) {
       setLocalError(err instanceof Error ? err.message : 'Проверка не удалась');
     } finally {
@@ -115,10 +119,12 @@ export const ConnectorCard = ({
           <strong>{connector.name}</strong>
           <span>{connector.description}</span>
         </span>
-        <span className="chip mcp">MCP</span>
-        <StatusBadge status={status} label={connectionStatusLabel(status)} />
-        <span className={`chevron ${expanded ? 'open' : ''}`}>
-          <Icon name="chevron" size={16} />
+        <span className="node-row-meta">
+          <span className="chip mcp">MCP</span>
+          <StatusBadge status={status} label={connectionStatusLabel(status)} />
+          <span className={`chevron ${expanded ? 'open' : ''}`}>
+            <Icon name="chevron" size={16} />
+          </span>
         </span>
       </button>
       {expanded ? (
@@ -130,6 +136,49 @@ export const ConnectorCard = ({
               </span>
             ))}
           </div>
+          {connector.id === 'web' ? (
+            <p className="muted">
+              Подключать аккаунт не обязательно. Поиск — DuckDuckGo, курсы
+              BestChange — шаг «Курсы» (архив API, не HTML-страница). Сайт
+              логина этим шагом не открыть. Поля из страницы достаёт шаг LLM.
+            </p>
+          ) : null}
+          {connector.id === 'browser' ? (
+            <p className="muted">
+              Chromium через Playwright: SPA и страницы с JavaScript. На машине
+              worker выполните npx playwright install chromium. Cookies —
+              необязательный storageState JSON. Парк аккаунтов этим шагом не
+              автоматизируется.
+            </p>
+          ) : null}
+          {connector.id === 'llm' ? (
+            <p className="muted">
+              Подключать не обязательно, если в .env задан GEMINI_API_KEY или
+              QWEN_API_KEY. Ключ в карточке нужен, только чтобы переопределить
+              окружение.
+            </p>
+          ) : null}
+          {connector.id === 'transform' ? (
+            <p className="muted">
+              Учётные данные не нужны. Фильтр, сортировка и сборка текста
+              выполняются локально.
+            </p>
+          ) : null}
+          {connector.id === 'memory' ? (
+            <p className="muted">
+              Память между запусками этого workflow: intent, file_id голосового,
+              offset Telegram. Подключать ничего не нужно.
+            </p>
+          ) : null}
+          {connector.id === 'social' ? (
+            <p className="muted">
+              VK — access token. Instagram — Graph token и user id
+              профессионального аккаунта (Business Discovery). Просмотры чужих
+              Reels Graph не отдаёт: укажите HTTP-провайдер (base URL + ключ,
+              пути /followers и /reels). LinkedIn — только страницы компаний,
+              не личные профили. web.fetch эти сайты не открывает.
+            </p>
+          ) : null}
           {connections.length ? (
             <ul className="connection-list">
               {connections.map((item) => (
@@ -203,10 +252,7 @@ export const ConnectorCard = ({
               />
             </label>
             {connector.credentialFields.length === 0 ? (
-              <p className="muted">
-                Этому коннектору не нужны учётные данные (используется
-                OPENAI_API_KEY).
-              </p>
+              <p className="muted">Этому коннектору не нужны учётные данные.</p>
             ) : (
               connector.credentialFields.map((field) => (
                 <label key={field.key}>
