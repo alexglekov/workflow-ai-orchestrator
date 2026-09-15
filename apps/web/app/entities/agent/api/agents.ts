@@ -11,7 +11,22 @@ import type {
 export const toAgentHistory = (messages: AgentMessage[] = []) =>
   messages
     .filter((item) => item.status !== 'error')
-    .map(({ role, content }) => ({ role, content }));
+    .map(({ role, content }) => ({
+      role,
+      content: content
+        .replace(/\[\[connect:[a-z0-9_]+\]\]/gi, '')
+        .split('[[connect_telegram]]')
+        .join('')
+        .split('[[launch]]')
+        .join('')
+        .replace(/\[\[status:connected:[a-z0-9_]+\]\]/gi, '')
+        .split('[[status:launched]]')
+        .join('')
+        .split('[[status:stopped]]')
+        .join('')
+        .replace(/\[\[run:[a-z0-9-]+\]\]/gi, '')
+        .trim(),
+    }));
 
 export const fetchAgents = () => http<AgentCatalog>('/agents');
 

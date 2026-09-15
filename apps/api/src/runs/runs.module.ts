@@ -1,4 +1,4 @@
-import { Module } from '@nestjs/common';
+import { Module, forwardRef } from '@nestjs/common';
 import { ConnectionsModule } from '../connections/connections.module';
 import { ConnectorsModule } from '../connectors/connectors.module';
 import { WorkflowsModule } from '../workflows/workflows.module';
@@ -8,7 +8,11 @@ import { RunsController } from './runs.controller';
 import { RunsService } from './runs.service';
 
 @Module({
-  imports: [ConnectorsModule, ConnectionsModule, WorkflowsModule],
+  imports: [
+    ConnectorsModule,
+    ConnectionsModule,
+    forwardRef(() => WorkflowsModule),
+  ],
   controllers: [RunsController],
   providers: [RunsRepository, WorkflowStateRepository, RunsService],
   exports: [RunsService],

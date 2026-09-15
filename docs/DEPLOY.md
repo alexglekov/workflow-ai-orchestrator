@@ -31,7 +31,7 @@ ENCRYPTION_KEY=...          # длинная случайная строка, с
 API_PASSWORD=...
 CADDY_SITE=your.domain      # HTTPS; или http://:80 если только IP
 PUBLIC_API_URL=https://your.domain/api
-GEMINI_API_KEY=...          # или QWEN_API_KEY
+QWEN_API_KEY=...
 ```
 
 Все переменные из `.env.example` прокидываются в **api** и **worker** через `infra/docker/docker-compose.prod.yml` (`x-app-env`). `DATABASE_URL` внутри сети Docker переписывается на `postgres:5432`.

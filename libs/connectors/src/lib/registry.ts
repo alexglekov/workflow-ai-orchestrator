@@ -7,7 +7,6 @@ import { webConnector } from './web/web.connector';
 import { llmConnector } from './llm/llm.connector';
 import { transformConnector } from './transform/transform.connector';
 import { memoryConnector } from './memory/memory.connector';
-import { socialConnector } from './social/social.connector';
 import { browserConnector } from './browser/browser.connector';
 
 export class ConnectorRegistry {
@@ -34,6 +33,5 @@ export const createDefaultRegistry = (): ConnectorRegistry =>
     llmConnector,
     transformConnector,
     memoryConnector,
-    socialConnector,
     browserConnector,
   ]);

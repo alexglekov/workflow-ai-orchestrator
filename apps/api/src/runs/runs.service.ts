@@ -1,6 +1,12 @@
-import { Injectable, Logger, NotFoundException } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  NotFoundException,
+  forwardRef,
+} from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { telegramCall } from '@ai-worker/connectors';
+import { telegramCall, resolveBotToken } from '@ai-worker/connectors';
 import { runWorkflow } from '@ai-worker/workflow';
 import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
@@ -24,6 +30,7 @@ export class RunsService {
   constructor(
     private readonly runs: RunsRepository,
     private readonly state: WorkflowStateRepository,
+    @Inject(forwardRef(() => WorkflowsService))
     private readonly workflows: WorkflowsService,
     private readonly connectors: ConnectorRegistryService,
     private readonly connections: ConnectionsService,
@@ -241,8 +248,9 @@ export class RunsService {
         `run ${runId}`,
       ].join('\n');
       const found = await this.connections.resolveCredentials('telegram');
-      const token = found.credentials['botToken'];
-      const chatId = found.credentials['chatId'];
+      const token = resolveBotToken(found.credentials);
+      const chatId =
+        found.credentials['userChatId'] || found.credentials['chatId'];
 
       if (!token || !chatId) {
         return;

@@ -3,13 +3,39 @@ import type { Workflow } from '../model/types';
 
 export const fetchWorkflows = () => http<Workflow[]>('/workflows');
 
+export const fetchWorkflow = (id: string) => http<Workflow>(`/workflows/${id}`);
+
 export const createWorkflow = (payload?: { name?: string; prompt?: string }) =>
   http<Workflow>('/workflows', {
     method: 'POST',
     body: JSON.stringify(payload ?? {}),
   });
 
-export const fetchWorkflow = (id: string) => http<Workflow>(`/workflows/${id}`);
+export const appendWorkflowChat = (
+  workflowId: string,
+  payload: {
+    thread: 'ask' | 'build';
+    messages: Array<{ role: 'user' | 'assistant'; content: string }>;
+  },
+) =>
+  http<void>(`/workflows/${workflowId}/chat`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
+
+export const settleWorkflowChat = (
+  workflowId: string,
+  payload: {
+    thread: 'ask' | 'build';
+    match: string;
+    rewrite?: string;
+    content?: string;
+  },
+) =>
+  http<void>(`/workflows/${workflowId}/chat/settle`, {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  });
 
 export const updateWorkflow = (
   id: string,

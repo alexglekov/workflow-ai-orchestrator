@@ -45,7 +45,6 @@ export type SearchResponse = {
 /** Провайдеры, которые ищут по всему вебу. Остальные — аварийный резерв. */
 const WEB_INDEX = new Set([
   'llm',
-  'gemini',
   'qwen',
   'brave',
   'brave-html',
@@ -140,9 +139,7 @@ const enrich = async (
 const groundedAnswer = (results: SearchHit[]): string => {
   const fromLlm = results.find(
     (item) =>
-      (item.provider === 'llm' ||
-        item.provider === 'gemini' ||
-        item.provider === 'qwen') &&
+      (item.provider === 'llm' || item.provider === 'qwen') &&
       (item.text || '').trim().length > 40,
   );
 

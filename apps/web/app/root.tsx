@@ -10,6 +10,7 @@ import {
 import { Provider } from 'jotai';
 import { Topbar } from '~/widgets/topbar';
 import { ApiGate } from '~/shared/ui/ApiGate';
+import { ToastHost } from '~/shared/ui/ToastHost';
 import '~/shared/styles/globals.css';
 
 export const meta: MetaFunction = () => [
@@ -47,6 +48,7 @@ export const Layout = ({ children }: { children: React.ReactNode }) => (
           <Topbar />
           <main className="stage">{children}</main>
         </div>
+        <ToastHost />
       </Provider>
       <ScrollRestoration />
       <Scripts />

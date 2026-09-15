@@ -11,8 +11,8 @@ import {
 } from 'class-validator';
 
 export class CreateTriggerDto {
-  @IsIn(['schedule', 'webhook', 'mail', 'telegram'])
-  type!: 'schedule' | 'webhook' | 'mail' | 'telegram';
+  @IsIn(['schedule', 'webhook'])
+  type!: 'schedule' | 'webhook';
 
   @IsOptional()
   @IsBoolean()

@@ -1,14 +1,15 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { Inject, Injectable, NotFoundException, forwardRef } from '@nestjs/common';
+import { stripChatMarks } from '@ai-worker/connectors';
 import { parsePromptToSteps, STARTER_PROMPT, starterSteps } from '@ai-worker/workflow';
-import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
+import { TriggersService } from '../triggers/triggers.service';
 import {
   CreateWorkflowDto,
   ParseWorkflowDto,
+  SettleChatDto,
   UpdateWorkflowDto,
 } from './dto';
 import { WorkflowChatRepository, type ChatThread } from './persistence/workflow-chat.repository';
-import { WorkflowStepInput } from './persistence/workflow-step.input';
 import { WorkflowsRepository } from './persistence/workflows.repository';
 
 const DEMO_PROMPT = STARTER_PROMPT;
@@ -19,7 +20,8 @@ export class WorkflowsService {
     private readonly workflows: WorkflowsRepository,
     private readonly chat: WorkflowChatRepository,
     private readonly connectors: ConnectorRegistryService,
-    private readonly connections: ConnectionsService,
+    @Inject(forwardRef(() => TriggersService))
+    private readonly eventTriggers: TriggersService,
   ) {}
 
   list = () => this.workflows.findAll();
@@ -34,25 +36,42 @@ export class WorkflowsService {
     return workflow;
   };
 
-  create = async (dto: CreateWorkflowDto) =>
-    this.workflows.create({
+  create = async (dto: CreateWorkflowDto) => {
+    const created = await this.workflows.create({
       name: dto.name || 'Новый workflow',
       prompt: dto.prompt || '',
-      steps: dto.steps
-        ? await this.bindSoleConnections(dto.steps)
-        : dto.steps,
+      steps: dto.steps,
     });
+
+    if (dto.steps?.length) {
+      await this.eventTriggers.syncFromSteps(created.id, dto.steps);
+    }
+
+    if (created.prompt) {
+      await this.eventTriggers.syncScheduleFromPrompt(created.id, created.prompt);
+    }
+
+    return created;
+  };
 
   update = async (id: string, dto: UpdateWorkflowDto) => {
     await this.get(id);
 
-    return this.workflows.replace(id, {
+    const workflow = await this.workflows.replace(id, {
       name: dto.name,
       prompt: dto.prompt,
-      steps: dto.steps
-        ? await this.bindSoleConnections(dto.steps)
-        : dto.steps,
+      steps: dto.steps,
     });
+
+    if (dto.steps) {
+      await this.eventTriggers.syncFromSteps(id, dto.steps);
+    }
+
+    if (dto.prompt) {
+      await this.eventTriggers.syncScheduleFromPrompt(id, dto.prompt);
+    }
+
+    return workflow;
   };
 
   remove = async (id: string) => {
@@ -92,11 +111,11 @@ export class WorkflowsService {
       .filter((row) => row.status !== 'error')
       .map((row) => ({
         role: row.role as 'user' | 'assistant',
-        content: row.content,
+        content: stripChatMarks(row.content),
       }));
   };
 
-  appendChat = (
+  appendChat = async (
     id: string,
     thread: ChatThread,
     items: Array<{
@@ -104,7 +123,35 @@ export class WorkflowsService {
       content: string;
       status?: 'error';
     }>,
-  ) => this.chat.append(id, thread, items);
+  ) => {
+    await this.get(id);
+
+    return this.chat.append(id, thread, items);
+  };
+
+  settleChat = async (id: string, dto: SettleChatDto) => {
+    await this.get(id);
+
+    return this.chat.settle(id, dto.thread, dto.match, {
+      rewrite: dto.rewrite,
+      content: dto.content,
+    });
+  };
+
+  syncSchedule = (id: string, text: string) =>
+    this.eventTriggers.syncScheduleFromPrompt(id, text);
+
+  stopLive = async (id: string) => {
+    await this.get(id);
+
+    return this.eventTriggers.disableLive(id);
+  };
+
+  startLive = async (id: string) => {
+    await this.get(id);
+
+    return this.eventTriggers.enableLive(id);
+  };
 
   parse = async (id: string, dto: ParseWorkflowDto) => {
     await this.get(id);
@@ -124,33 +171,6 @@ export class WorkflowsService {
     this.workflows.create({
       name: 'Письма → Excel → Telegram',
       prompt: DEMO_PROMPT,
-      steps: await this.bindSoleConnections(starterSteps()),
+      steps: starterSteps(),
     });
-
-  private bindSoleConnections = async (steps: WorkflowStepInput[]) => {
-    const ids = [...new Set(steps.map((step) => step.connectorId))];
-    const sole = new Map<string, string>();
-
-    await Promise.all(
-      ids.map(async (connectorId) => {
-        const id = await this.connections.soleId(connectorId);
-
-        if (id) {
-          sole.set(connectorId, id);
-        }
-      }),
-    );
-
-    return steps.map((step) => {
-      const current = step.connectionId?.trim();
-
-      if (current) {
-        return step;
-      }
-
-      const bound = sole.get(step.connectorId);
-
-      return bound ? { ...step, connectionId: bound } : step;
-    });
-  };
 }

@@ -6,7 +6,7 @@ import {
 import {
   firstNonEmpty,
   interpolate,
-  stringifyResult,
+  humanText,
 } from '../interpolate';
 import { completeLlm } from './complete';
 import { parseJsonObject } from './parse-json';
@@ -77,7 +77,7 @@ const sourceText = (
     return `${fromPrevious}${tables}`.trim();
   }
 
-  return stringifyResult(previous);
+  return humanText(previous);
 };
 
 const GENERATE_SYSTEM = [
@@ -180,17 +180,8 @@ export const llmConnector: Connector = {
   id: 'llm',
   name: 'LLM',
   description:
-    'Извлечение полей, классификация и генерация текста во время запуска. Ключ из подключения или GEMINI_API_KEY / QWEN_API_KEY',
+    'Извлечение полей, классификация и генерация текста во время запуска. Ключ из подключения или QWEN_API_KEY',
   credentialFields: [
-    {
-      key: 'provider',
-      label: 'Провайдер',
-      type: 'select',
-      options: [
-        { value: 'gemini', label: 'Gemini' },
-        { value: 'qwen', label: 'Qwen' },
-      ],
-    },
     {
       key: 'apiKey',
       label: 'API-ключ (необязательно, иначе из .env)',
@@ -200,7 +191,7 @@ export const llmConnector: Connector = {
     {
       key: 'model',
       label: 'Модель (необязательно)',
-      placeholder: 'gemini-3.6-flash или qwen-plus',
+      placeholder: 'qwen-plus',
     },
   ],
   actions: [
@@ -259,7 +250,7 @@ export const llmConnector: Connector = {
     {
       id: 'transcribe',
       name: 'Распознать речь',
-      description: 'Аудио (base64 с предыдущего шага) → текст. Gemini inline или Qwen ASR',
+      description: 'Аудио (base64 с предыдущего шага) → текст. Qwen ASR',
       paramsSchema: {
         audioBase64: { type: 'string', description: 'Если нет — previous.audioBase64' },
       },
@@ -281,7 +272,7 @@ export const llmConnector: Connector = {
       if (!llm.apiKey) {
         return {
           ok: false,
-          error: 'Задайте API-ключ в подключении или в GEMINI_API_KEY / QWEN_API_KEY',
+          error: 'Задайте API-ключ в подключении или в QWEN_API_KEY',
         };
       }
 
@@ -305,7 +296,7 @@ export const llmConnector: Connector = {
         ok: false,
         error:
           message === 'fetch failed'
-            ? 'Не удалось достучаться до Gemini/Qwen. Проверьте ключ, сеть и QWEN_BASE_URL'
+            ? 'Не удалось достучаться до Qwen. Проверьте ключ, сеть и QWEN_BASE_URL'
             : message,
       };
     }

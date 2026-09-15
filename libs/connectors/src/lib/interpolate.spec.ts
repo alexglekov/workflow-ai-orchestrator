@@ -32,4 +32,41 @@ describe('interpolate', () => {
 
     assert.equal(value, '{\n  "a": 1\n}');
   });
+
+  it('writes telegram payloads as a human message', () => {
+    const value = interpolate(
+      '{{previous}}',
+      templateContext({
+        previous: {
+          text: 'Hi',
+          count: 1,
+          items: [
+            {
+              text: 'Hi',
+              username: 'alexglekov',
+              chatId: '1',
+            },
+          ],
+        },
+      }),
+    );
+
+    assert.equal(value, 'alexglekov: Hi');
+  });
+
+  it('does not dump an empty telegram event as JSON', () => {
+    const value = interpolate(
+      '{{previous}}',
+      templateContext({
+        previous: {
+          count: 0,
+          items: [],
+          messages: [],
+          source: 'event',
+        },
+      }),
+    );
+
+    assert.equal(value, '');
+  });
 });

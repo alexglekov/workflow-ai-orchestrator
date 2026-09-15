@@ -13,7 +13,7 @@ export const telegramCall = async <T>(
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: payload ? JSON.stringify(payload) : undefined,
-    signal: AbortSignal.timeout(20_000),
+    signal: AbortSignal.timeout(55_000),
   });
 
   return (await response.json()) as TelegramApiResult<T>;

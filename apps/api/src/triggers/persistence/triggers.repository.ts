@@ -29,6 +29,12 @@ export class TriggersRepository {
       },
     });
 
+  listEnabledByType = (type: TriggerType) =>
+    this.prisma.trigger.findMany({
+      where: { enabled: true, type },
+      orderBy: { createdAt: 'asc' },
+    });
+
   create = (data: {
     workflowId: string;
     type: TriggerType;

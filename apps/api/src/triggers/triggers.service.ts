@@ -1,11 +1,16 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   Logger,
   NotFoundException,
+  forwardRef,
 } from '@nestjs/common';
-import { flattenTelegramInput } from '@ai-worker/connectors';
-import { ConnectionsService } from '../connections/connections.service';
+import { flattenTelegramInput, eventTriggerTypesFromSteps } from '@ai-worker/connectors';
+import {
+  parseScheduleIntent,
+  type ScheduleIntent,
+} from '@ai-worker/workflow';
 import { RunsService } from '../runs/runs.service';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { CreateTriggerDto, UpdateTriggerDto } from './dto/trigger.dto';
@@ -18,42 +23,13 @@ import {
   type TriggerType,
 } from './lib/is-due';
 import { TriggersRepository } from './persistence/triggers.repository';
+import { TelegramGatewayService } from './telegram.service';
 
 const resolveTimezone = (value?: string, config?: unknown): string =>
   String(value || '').trim() ||
   (config ? scheduleTimeZone(config) : '') ||
   process.env['SCHEDULE_TZ'] ||
   DEFAULT_SCHEDULE_TZ;
-
-const publicApiBase = (): string =>
-  (process.env['PUBLIC_API_URL'] || '').trim().replace(/\/+$/, '');
-
-const telegramWebhookUrl = (token: string): string | null => {
-  const base = publicApiBase();
-
-  if (!base.startsWith('https://')) {
-    return null;
-  }
-
-  return `${base}/hooks/${token}`;
-};
-
-const setTelegramWebhook = async (botToken: string, url: string) => {
-  const response = await fetch(
-    `https://api.telegram.org/bot${botToken}/setWebhook`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, allowed_updates: ['message', 'callback_query'] }),
-      signal: AbortSignal.timeout(15_000),
-    },
-  );
-  const body = (await response.json()) as { ok?: boolean; description?: string };
-
-  if (!body.ok) {
-    throw new Error(body.description || 'setWebhook failed');
-  }
-};
 
 @Injectable()
 export class TriggersService {
@@ -62,13 +38,29 @@ export class TriggersService {
 
   constructor(
     private readonly triggers: TriggersRepository,
+    @Inject(forwardRef(() => WorkflowsService))
     private readonly workflows: WorkflowsService,
+    @Inject(forwardRef(() => RunsService))
     private readonly runs: RunsService,
-    private readonly connections: ConnectionsService,
+    private readonly telegram: TelegramGatewayService,
   ) {}
 
   list = async (workflowId: string) => {
-    await this.workflows.get(workflowId);
+    const workflow = await this.workflows.get(workflowId);
+
+    await this.syncFromSteps(workflowId, workflow.steps);
+
+    const chat = await this.workflows.listChatThread(workflowId, 'build');
+    const fromChat = chat
+      .filter((item) => item.role === 'user')
+      .map((item) => item.content)
+      .join('\n');
+
+    await this.syncScheduleFromPrompt(
+      workflowId,
+      [workflow.prompt, fromChat].filter(Boolean).join('\n'),
+      { updateExisting: false },
+    );
 
     return this.triggers.listByWorkflow(workflowId);
   };
@@ -90,28 +82,12 @@ export class TriggersService {
       }
     }
 
-    if (dto.type === 'telegram') {
-      config['delivery'] = 'poll';
-    }
-
-    const created = await this.triggers.create({
+    return this.triggers.create({
       workflowId,
       type: dto.type,
       enabled: dto.enabled,
       config,
     });
-
-    if (dto.type === 'telegram' && created.token) {
-      const hooked = await this.trySetTelegramWebhook(created.token);
-
-      if (hooked) {
-        return this.triggers.update(created.id, {
-          config: { ...config, delivery: 'webhook' },
-        });
-      }
-    }
-
-    return created;
   };
 
   update = async (id: string, dto: UpdateTriggerDto) => {
@@ -156,15 +132,124 @@ export class TriggersService {
       throw new NotFoundException('Триггер не найден');
     }
 
-    if (current.type === 'telegram') {
-      await this.clearTelegramWebhook().catch((error) => {
-        this.logger.warn(
-          error instanceof Error ? error.message : 'deleteWebhook failed',
-        );
+    await this.triggers.delete(id);
+  };
+
+  syncFromSteps = async (
+    workflowId: string,
+    steps: Array<{ connectorId: string; action: string }>,
+  ) => {
+    const needed = new Set(eventTriggerTypesFromSteps(steps));
+    const current = await this.triggers.listByWorkflow(workflowId);
+
+    for (const type of needed) {
+      if (current.some((item) => item.type === type)) {
+        continue;
+      }
+
+      await this.triggers.create({
+        workflowId,
+        type,
+        enabled: true,
+        config:
+          type === 'telegram'
+            ? { delivery: 'push' }
+            : { everyMinutes: minutesOf({}, type) },
       });
+
+      if (type === 'telegram') {
+        await this.telegram.ensureWebhooks();
+      }
     }
 
-    await this.triggers.delete(id);
+    for (const item of current) {
+      if (
+        (item.type === 'telegram' || item.type === 'mail') &&
+        !needed.has(item.type)
+      ) {
+        await this.triggers.delete(item.id);
+      }
+    }
+  };
+
+  syncScheduleFromPrompt = async (
+    workflowId: string,
+    text: string,
+    options: { updateExisting?: boolean } = {},
+  ): Promise<ScheduleIntent | null> => {
+    const intent = parseScheduleIntent(text);
+
+    if (!intent) {
+      return null;
+    }
+
+    await this.workflows.get(workflowId);
+
+    const current = await this.triggers.listByWorkflow(workflowId);
+    const existing = current.find((item) => item.type === 'schedule');
+    const config = intent.at
+      ? {
+          at: intent.at,
+          everyMinutes: 1440,
+          timezone: resolveTimezone(),
+        }
+      : { everyMinutes: intent.everyMinutes };
+
+    if (existing) {
+      if (options.updateExisting === false) {
+        return intent;
+      }
+
+      await this.triggers.update(existing.id, {
+        enabled: true,
+        config,
+      });
+      return intent;
+    }
+
+    await this.triggers.create({
+      workflowId,
+      type: 'schedule',
+      enabled: true,
+      config,
+    });
+
+    return intent;
+  };
+
+  disableLive = async (workflowId: string) => {
+    const current = await this.triggers.listByWorkflow(workflowId);
+    const live = current.filter(
+      (item) =>
+        item.enabled &&
+        (item.type === 'schedule' ||
+          item.type === 'telegram' ||
+          item.type === 'mail'),
+    );
+
+    for (const item of live) {
+      await this.triggers.update(item.id, { enabled: false });
+    }
+
+    return live.length;
+  };
+
+  enableLive = async (workflowId: string) => {
+    const current = await this.triggers.listByWorkflow(workflowId);
+    const targets = current.filter(
+      (item) =>
+        item.type === 'schedule' ||
+        item.type === 'telegram' ||
+        item.type === 'mail',
+    );
+
+    for (const item of targets) {
+      if (!item.enabled) {
+        await this.triggers.update(item.id, { enabled: true });
+      }
+    }
+
+    return targets.length;
   };
 
   fireWebhook = async (token: string, input: unknown) => {
@@ -212,9 +297,7 @@ export class TriggersService {
       const due = await this.triggers.listDue();
 
       for (const trigger of due) {
-        const config = asConfig(trigger.config);
-
-        if (trigger.type === 'telegram' && config['delivery'] === 'webhook') {
+        if (trigger.type === 'telegram') {
           continue;
         }
 
@@ -266,46 +349,5 @@ export class TriggersService {
     } finally {
       this.ticking = false;
     }
-  };
-
-  private trySetTelegramWebhook = async (hookToken: string) => {
-    const url = telegramWebhookUrl(hookToken);
-
-    if (!url) {
-      return false;
-    }
-
-    try {
-      const found = await this.connections.resolveCredentials('telegram');
-      const botToken = found.credentials['botToken'];
-
-      if (!botToken) {
-        return false;
-      }
-
-      await setTelegramWebhook(botToken, url);
-      this.logger.log(`Telegram webhook: ${url}`);
-
-      return true;
-    } catch (error) {
-      this.logger.warn(
-        `Telegram setWebhook: ${
-          error instanceof Error ? error.message : 'не удалось'
-        }. Будет опрос getUpdates.`,
-      );
-
-      return false;
-    }
-  };
-
-  private clearTelegramWebhook = async () => {
-    const found = await this.connections.resolveCredentials('telegram');
-    const botToken = found.credentials['botToken'];
-
-    if (!botToken) {
-      return;
-    }
-
-    await setTelegramWebhook(botToken, '');
   };
 }

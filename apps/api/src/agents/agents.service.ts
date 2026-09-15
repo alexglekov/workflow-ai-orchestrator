@@ -3,7 +3,6 @@ import {
   BadRequestException,
   HttpException,
   Injectable,
-  NotFoundException,
 } from '@nestjs/common';
 import {
   createDefaultRegistry,
@@ -13,6 +12,16 @@ import {
   type AgentPlanResult,
   type AgentProvider,
 } from '@ai-worker/agents';
+import {
+  requiredConnectorIds,
+  unresolvedConnectorIds,
+  withReadyCta,
+  isStopIntent,
+  isLaunchIntent,
+  STATUS_STOPPED_MARK,
+  launchedStatusMessage,
+} from '@ai-worker/connectors';
+import { parseScheduleIntent, scheduleIntentLabel } from '@ai-worker/workflow';
 import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
 import { WorkflowsService } from '../workflows/workflows.service';
@@ -29,7 +38,7 @@ export class AgentsService {
   ) {}
 
   list = () => ({
-    active: process.env['AGENT_PROVIDER'] || 'gemini',
+    active: 'qwen',
     providers: this.registry.info(),
   });
 
@@ -53,11 +62,17 @@ export class AgentsService {
         if (dto.workflowId) {
           await this.workflows.appendChat(dto.workflowId, 'ask', [
             { role: 'user', content: message },
-            { role: 'assistant', content: reply.message },
+            {
+              role: 'assistant',
+              content: await this.withReadyCta(reply.message, [], message),
+            },
           ]);
         }
 
-        return reply;
+        return {
+          ...reply,
+          message: await this.withReadyCta(reply.message, [], message),
+        };
       } catch (err) {
         if (dto.workflowId) {
           await this.workflows.appendChat(dto.workflowId, 'ask', [
@@ -91,6 +106,47 @@ export class AgentsService {
 
       const prompt = dto.prompt.trim();
       const message = (dto.message || dto.prompt).trim();
+
+      if (dto.workflowId && isStopIntent(message)) {
+        await this.workflows.stopLive(dto.workflowId);
+        const content = `Остановлено.\n${STATUS_STOPPED_MARK}`;
+
+        await this.workflows.appendChat(dto.workflowId, 'build', [
+          { role: 'user', content: message },
+          { role: 'assistant', content },
+        ]);
+
+        return {
+          kind: 'questions',
+          providerId: provider.id,
+          message: content,
+          questions: [],
+          connectors: [],
+          steps: [],
+        };
+      }
+
+      if (dto.workflowId && isLaunchIntent(message)) {
+        const started = await this.workflows.startLive(dto.workflowId);
+
+        if (started > 0) {
+          const content = launchedStatusMessage();
+
+          await this.workflows.appendChat(dto.workflowId, 'build', [
+            { role: 'user', content: message },
+            { role: 'assistant', content },
+          ]);
+
+          return {
+            kind: 'questions',
+            providerId: provider.id,
+            message: content,
+            questions: [],
+            connectors: [],
+            steps: [],
+          };
+        }
+      }
       const history = dto.workflowId
         ? await this.workflows.listChatThread(dto.workflowId, 'build')
         : dto.history;
@@ -106,9 +162,27 @@ export class AgentsService {
           }),
           context,
         );
+        const scheduleSource = [prompt, message].filter(Boolean).join('\n');
+        const schedule = dto.workflowId
+          ? await this.workflows.syncSchedule(dto.workflowId, scheduleSource)
+          : parseScheduleIntent(scheduleSource);
+        const scheduleNote =
+          schedule &&
+          !/расписан|каждую минут|каждые |каждый час|ежедневн/i.test(
+            planned.message,
+          )
+            ? `\n\nПоставил запуск ${scheduleIntentLabel(schedule)}.`
+            : '';
         const result = {
           ...planned,
-          message: toAssistantMessage(planned),
+          message: await this.withReadyCta(
+            `${toAssistantMessage(planned)}${scheduleNote}`.trim(),
+            planned.kind === 'workflow' ? planned.steps : [],
+            prompt,
+            message,
+            ...(planned.connectors ?? []),
+            ...(planned.steps ?? []).map((step) => step.connectorId),
+          ),
         };
 
         if (dto.workflowId) {
@@ -127,10 +201,19 @@ export class AgentsService {
           const shouldRename =
             Boolean(result.name) &&
             (!current.name || current.name === 'Новый workflow');
+          const bound = new Map(
+            current.steps
+              .filter((step) => step.connectionId)
+              .map((step) => [step.connectorId, step.connectionId]),
+          );
+          const steps = result.steps.map((step) => ({
+            ...step,
+            connectionId: bound.get(step.connectorId) || null,
+          }));
           const workflow = await this.workflows.update(dto.workflowId, {
             prompt,
             name: shouldRename ? result.name : undefined,
-            steps: result.steps,
+            steps,
           });
 
           return { ...result, workflow };
@@ -163,22 +246,6 @@ export class AgentsService {
     providerId?: string,
     capability: AgentCapability = 'ask',
   ): AgentProvider => {
-    if (providerId && providerId !== 'orchestrator') {
-      const provider = this.registry.get(providerId);
-
-      if (!provider) {
-        throw new NotFoundException(`Агент ${providerId} не найден`);
-      }
-
-      if (!provider.available()) {
-        throw new BadRequestException(
-          `Агент ${provider.name} недоступен. Проверьте API-ключ.`,
-        );
-      }
-
-      return provider;
-    }
-
     return this.registry.resolve(capability, providerId);
   };
 
@@ -216,9 +283,42 @@ export class AgentsService {
           title: step.title,
           connectorId: step.connectorId,
           action: step.action,
+          connectionId: step.connectionId,
         })),
       },
     };
+  };
+
+  private withReadyCta = async (
+    message: string,
+    steps: Array<{ connectorId: string; connectionId?: string | null }>,
+    ...signals: string[]
+  ) => {
+    const connections = await this.connections.list();
+    const fromSteps = requiredConnectorIds(steps);
+    const fromSignals =
+      fromSteps.includes('telegram') ||
+      signals.some(
+        (item) => item === 'telegram' || /телеграм|telegram/i.test(item),
+      )
+        ? ['telegram']
+        : [];
+    const required = [...new Set([...fromSteps, ...fromSignals])];
+    const bindings =
+      required.length === 0
+        ? steps
+        : required.flatMap((id) => {
+            const bound = steps.filter((step) => step.connectorId === id);
+
+            return bound.length ? bound : [{ connectorId: id, connectionId: null }];
+          });
+    const missing = unresolvedConnectorIds(bindings, connections);
+
+    return withReadyCta(
+      message,
+      missing,
+      fromSteps.length > 0 && missing.length === 0,
+    );
   };
 }
 

@@ -66,7 +66,7 @@ export const triggerKindLabel = (type: string) => {
   }
 
   if (type === 'mail') {
-    return 'Почта';
+    return 'Новые письма';
   }
 
   if (type === 'telegram') {
@@ -82,6 +82,14 @@ export const triggerLaunchLabel = (trigger: {
 }) => {
   if (trigger.type === 'webhook') {
     return 'HTTP POST';
+  }
+
+  if (trigger.type === 'telegram') {
+    return 'Входящие сообщения';
+  }
+
+  if (trigger.type === 'mail') {
+    return 'Когда приходят письма';
   }
 
   return timingLabel(

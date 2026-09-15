@@ -6,6 +6,8 @@ export {
   fetchWorkflow,
   updateWorkflow,
   parseWorkflow,
+  appendWorkflowChat,
+  settleWorkflowChat,
   createDemoWorkflow,
   deleteWorkflow,
   clearWorkflows,

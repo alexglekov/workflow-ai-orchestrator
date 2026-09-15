@@ -133,13 +133,13 @@ Workflow каскадно удаляет steps, runs, triggers, state.
 | workflows | CRUD `/workflows`, `POST /workflows/demo`, `POST /workflows/:id/parse`, `DELETE /workflows` |
 | agents | `GET /agents`, `POST /agents/ask`, `POST /agents/plan` |
 | runs | `POST /workflows/:id/runs`, `GET /runs/:id`, `POST /runs/:id/retry`, `POST /runs/:id/cancel` |
-| triggers | CRUD на workflow, `POST /hooks/:token` |
+| triggers | CRUD на workflow, `POST /hooks/:token`, `GET /telegram/status`, `POST /telegram/register`, `POST /telegram/prepare`, `POST /telegram/sync`, `POST /telegram/webhook/:connectionId` |
 
 ## Библиотеки
 
 ### `@ai-worker/connectors`
 
-Плагины: mail, telegram, onec, excel, web, browser (Playwright), llm, transform, memory, social. Реестр in-memory (`createDefaultRegistry`).
+Плагины: mail, telegram, onec, excel, web, browser (Playwright), llm, transform, memory. Реестр in-memory (`createDefaultRegistry`).
 
 Контракт: `id`, каталог `actions` + `paramsSchema`, `credentialFields`, `testConnection`, `execute`. Интерполяция `{{previous}}`, `{{item}}`, `{{input}}`, `{{steps.N}}`. `iterate` разворачивает списки из `items` / `messages` / `rows` / `records` / `results`.
 
@@ -170,7 +170,7 @@ runtime?: { workflowId, getState, setState }
 
 ### `@ai-worker/agents`
 
-Провайдеры: Gemini (активный по умолчанию), Qwen и orchestrator («Авто» — берёт первого доступного). Если ключей нет ни у Gemini, ни у Qwen, `resolve` бросает ошибку, а не подставляет заглушку.
+Провайдер: Qwen. Если нет `QWEN_API_KEY`, `resolve` бросает ошибку, а не подставляет заглушку.
 
 - `ask` — ответ с контекстом каталога / подключений / текущего workflow
 - `plan` — `questions` или `workflow`; `sanitizePlan` оставляет только действия из каталога
@@ -235,7 +235,7 @@ interface WorkflowRepository {
 |---|---|---|
 | `runWorkflow` | `getConnector`, `getCredentials`, `onStepUpdate`, `shouldCancel` | несколько адаптеров, I/O, ядро не должно знать Nest/Prisma |
 | `Connector` | `execute` / `testConnection` | плагины: mail vs telegram vs browser |
-| `AgentProvider` | `ask` / `plan` | Gemini vs Qwen |
+| `AgentProvider` | `ask` / `plan` | Qwen |
 
 | Место | Почему нет порта в «ядре» |
 |---|---|

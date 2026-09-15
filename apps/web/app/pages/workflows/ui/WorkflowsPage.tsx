@@ -203,13 +203,13 @@ export const WorkflowsPage = () => {
             <div>
               <h2 className="workflow-history-title">Пайплайны</h2>
               <p className="workflow-history-note">
-                Не разовые: стартуют по расписанию, почте, Telegram или webhook
+                Не разовые: события из шагов, расписание или webhook
               </p>
             </div>
           </div>
           {live.length === 0 ? (
             <p className="muted">
-              Пока нет. Откройте workflow и добавьте триггер.
+              Пока нет. События появятся из шагов чата, расписание — с кнопки.
             </p>
           ) : (
             <ul className="workflow-list">
@@ -240,7 +240,7 @@ export const WorkflowsPage = () => {
             ) : null}
           </div>
           {drafts.length === 0 ? (
-            <p className="muted">Нет workflow без триггера</p>
+            <p className="muted">Нет workflow без события или триггера</p>
           ) : (
             <>
               <ul className="workflow-list">

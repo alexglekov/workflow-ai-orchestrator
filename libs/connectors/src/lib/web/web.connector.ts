@@ -89,8 +89,8 @@ export const webConnector: Connector = {
   credentialFields: [
     {
       key: 'allowLlmSearch',
-      label: 'Искать через Gemini/Qwen (true/false)',
-      placeholder: 'true — Google Search у Gemini или enable_search у Qwen',
+      label: 'Искать через Qwen (true/false)',
+      placeholder: 'true — enable_search у Qwen',
     },
     {
       key: 'braveApiKey',

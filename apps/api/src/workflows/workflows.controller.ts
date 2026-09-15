@@ -13,6 +13,8 @@ import {
   CreateWorkflowDto,
   ParseWorkflowDto,
   UpdateWorkflowDto,
+  AppendChatDto,
+  SettleChatDto,
 } from './dto';
 import { WorkflowsService } from './workflows.service';
 
@@ -57,6 +59,17 @@ export class WorkflowsController {
       before: before?.trim() || undefined,
       limit: Number.isFinite(take) ? take : undefined,
     });
+  }
+
+  @Post(':id/chat/settle')
+  @HttpCode(204)
+  settleChat(@Param('id') id: string, @Body() dto: SettleChatDto) {
+    return this.workflows.settleChat(id, dto);
+  }
+
+  @Post(':id/chat')
+  appendChat(@Param('id') id: string, @Body() dto: AppendChatDto) {
+    return this.workflows.appendChat(id, dto.thread, dto.messages);
   }
 
   @Get(':id')

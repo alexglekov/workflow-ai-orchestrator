@@ -3,6 +3,7 @@ import { useAtom } from 'jotai';
 import { connectionsAtom, fetchConnections } from '~/entities/connection';
 import { catalogAtom, fetchCatalog } from '~/entities/connector';
 import { ConnectorCard } from '~/features/manage-connection';
+import { CONNECTOR_GROUPS, connectorKind } from '~/shared/lib/connector-visuals';
 import { errorAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
 
@@ -37,32 +38,55 @@ export const ConnectorsPage = () => {
       <div className="list-shell">
         <h1 className="list-title">Коннекторы</h1>
         {error ? <Banner>{error}</Banner> : null}
-        <div className="card-grid">
-          {catalog.length === 0 ? (
-            <p className="muted">
-              Каталог пуст. Проверьте, что API запущен, и обновите страницу.
-            </p>
-          ) : (
-            catalog.map((connector) => (
-              <ConnectorCard
-                key={connector.id}
-                connector={connector}
-                connections={connections.filter(
-                  (item) => item.connectorId === connector.id,
-                )}
-                expanded={activeId === connector.id}
-                busy={busyId === connector.id}
-                onToggle={() =>
-                  setActiveId((current) =>
-                    current === connector.id ? null : connector.id,
-                  )
-                }
-                onBusy={(value) => setBusyId(value ? connector.id : null)}
-                onRefresh={reload}
-              />
-            ))
-          )}
-        </div>
+        {catalog.length === 0 ? (
+          <p className="muted">
+            Каталог пуст. Проверьте, что API запущен, и обновите страницу.
+          </p>
+        ) : (
+          CONNECTOR_GROUPS.map((group, index) => {
+            const items = catalog.filter(
+              (connector) => connectorKind(connector.id) === group.kind,
+            );
+
+            if (items.length === 0) {
+              return null;
+            }
+
+            return (
+              <section
+                key={group.kind}
+                className={`workflow-history${index === 0 ? ' is-first' : ''}`}
+              >
+                <div className="workflow-history-head">
+                  <div>
+                    <h2 className="workflow-history-title">{group.title}</h2>
+                    <p className="workflow-history-note">{group.hint}</p>
+                  </div>
+                </div>
+                <div className="card-grid">
+                  {items.map((connector) => (
+                    <ConnectorCard
+                      key={connector.id}
+                      connector={connector}
+                      connections={connections.filter(
+                        (item) => item.connectorId === connector.id,
+                      )}
+                      expanded={activeId === connector.id}
+                      busy={busyId === connector.id}
+                      onToggle={() =>
+                        setActiveId((current) =>
+                          current === connector.id ? null : connector.id,
+                        )
+                      }
+                      onBusy={(value) => setBusyId(value ? connector.id : null)}
+                      onRefresh={reload}
+                    />
+                  ))}
+                </div>
+              </section>
+            );
+          })
+        )}
       </div>
     </div>
   );

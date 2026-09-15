@@ -13,7 +13,10 @@ type IconName =
   | 'trash'
   | 'clock'
   | 'link'
-  | 'refresh';
+  | 'refresh'
+  | 'check'
+  | 'alert'
+  | 'stop';
 
 export const Icon = ({
   name,
@@ -109,6 +112,17 @@ export const Icon = ({
         <path d="M20 12a8 8 0 1 1-2.2-5.5" />
         <path d="M20 5v5h-5" />
       </>
+    ) : null}
+    {name === 'check' ? <path d="M5 12.5 9.5 17 19 7.5" /> : null}
+    {name === 'alert' ? (
+      <>
+        <circle cx="12" cy="12" r="8" />
+        <path d="M12 8v5" />
+        <circle cx="12" cy="16.2" r="0.8" fill="currentColor" stroke="none" />
+      </>
+    ) : null}
+    {name === 'stop' ? (
+      <rect x="6.5" y="6.5" width="11" height="11" rx="2.2" fill="currentColor" stroke="none" />
     ) : null}
   </svg>
 );

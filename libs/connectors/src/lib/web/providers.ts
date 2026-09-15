@@ -734,7 +734,7 @@ const browserSearch: SearchProvider = {
   },
 };
 
-/** Сначала поиск выбранной модели (Gemini Google Search / Qwen), затем ключи и скрейп. */
+/** Сначала поиск Qwen (`enable_search`), затем ключи и скрейп. */
 export const SEARCH_PROVIDERS: SearchProvider[] = [
   brave,
   googleCse,

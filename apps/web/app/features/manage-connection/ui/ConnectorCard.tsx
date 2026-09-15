@@ -7,12 +7,15 @@ import {
   type Connection,
 } from '~/entities/connection';
 import type { ConnectorCatalog } from '~/entities/connector';
-import { connectorVisual } from '~/shared/lib/connector-visuals';
+import { connectorKind } from '~/shared/lib/connector-visuals';
 import { connectionStatusLabel } from '~/shared/lib/status';
 import { Banner } from '~/shared/ui/Banner';
 import { Button } from '~/shared/ui/Button';
+import { ConnectorMark } from '~/shared/ui/ConnectorMark';
 import { Icon } from '~/shared/ui/Icon';
 import { StatusBadge } from '~/shared/ui/StatusBadge';
+import { useToast } from '~/shared/model/ui';
+import { TelegramConnectGuide } from './TelegramConnectGuide';
 
 export const ConnectorCard = ({
   connector,
@@ -35,6 +38,7 @@ export const ConnectorCard = ({
   const [name, setName] = useState(`${connector.name} аккаунт`);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [localError, setLocalError] = useState<string | null>(null);
+  const toast = useToast();
 
   useEffect(() => {
     const defaults: Record<string, string> = {};
@@ -51,6 +55,8 @@ export const ConnectorCard = ({
     setLocalError(null);
 
     try {
+      const wasEditing = Boolean(editingId);
+
       if (editingId) {
         await updateConnection(editingId, { name, credentials: form });
       } else {
@@ -62,11 +68,17 @@ export const ConnectorCard = ({
       }
 
       setEditingId(null);
+      toast(
+        wasEditing ? 'Подключение сохранено' : `${connector.name} подключён`,
+        'ok',
+      );
       await onRefresh();
     } catch (err) {
-      setLocalError(
-        err instanceof Error ? err.message : 'Не удалось сохранить',
-      );
+      const message =
+        err instanceof Error ? err.message : 'Не удалось сохранить';
+
+      setLocalError(message);
+      toast(message, 'error');
     } finally {
       onBusy(false);
     }
@@ -81,10 +93,19 @@ export const ConnectorCard = ({
       await onRefresh();
 
       if (result.status === 'error') {
-        setLocalError(result.lastError || 'Проверка не удалась');
+        const message = result.lastError || 'Проверка не удалась';
+
+        setLocalError(message);
+        toast(message, 'error');
+      } else {
+        toast('Подключение работает', 'ok');
       }
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Проверка не удалась');
+      const message =
+        err instanceof Error ? err.message : 'Проверка не удалась';
+
+      setLocalError(message);
+      toast(message, 'error');
     } finally {
       onBusy(false);
     }
@@ -95,39 +116,123 @@ export const ConnectorCard = ({
 
     try {
       await deleteConnection(id);
+      toast('Подключение удалено', 'ok');
       await onRefresh();
     } catch (err) {
-      setLocalError(err instanceof Error ? err.message : 'Не удалось удалить');
+      const message =
+        err instanceof Error ? err.message : 'Не удалось удалить';
+
+      setLocalError(message);
+      toast(message, 'error');
     } finally {
       onBusy(false);
     }
   };
 
-  const status = connections[0]?.status || 'disconnected';
-  const visual = connectorVisual(connector.id);
+  const kind = connectorKind(connector.id);
+  const status =
+    connections.find((item) => item.status === 'connected')?.status ||
+    connections.find((item) => item.status === 'error')?.status ||
+    connections[0]?.status ||
+    'disconnected';
+  const canConfigure = kind !== 'action';
+  const credentialForm = (
+    <form
+      className="stack"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void save();
+      }}
+    >
+      {localError ? <Banner>{localError}</Banner> : null}
+      <label>
+        Название
+        <input
+          value={name}
+          onChange={(event) => setName(event.target.value)}
+        />
+      </label>
+      {connector.credentialFields.length === 0 ? (
+        <p className="muted">Этому коннектору не нужны учётные данные.</p>
+      ) : (
+        connector.credentialFields.map((field) => (
+          <label key={field.key}>
+            {field.label}
+            {field.type === 'select' && field.options?.length ? (
+              <select
+                value={form[field.key] ?? field.options[0].value}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))
+                }
+              >
+                {field.options.map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+            ) : (
+              <input
+                type={
+                  field.secret || field.type === 'password'
+                    ? 'password'
+                    : field.type === 'number'
+                      ? 'number'
+                      : 'text'
+                }
+                placeholder={field.placeholder}
+                value={form[field.key] ?? ''}
+                onChange={(event) =>
+                  setForm((current) => ({
+                    ...current,
+                    [field.key]: event.target.value,
+                  }))
+                }
+              />
+            )}
+          </label>
+        ))
+      )}
+      <Button type="submit" disabled={busy}>
+        {editingId ? 'Сохранить' : 'Подключить'}
+      </Button>
+    </form>
+  );
+
+  const row = (
+    <>
+      <ConnectorMark id={connector.id} />
+      <span className="node-copy">
+        <strong>{connector.name}</strong>
+        <span>{connector.description}</span>
+      </span>
+      <span className="node-row-meta">
+        {kind === 'service' || connections[0] ? (
+          <StatusBadge status={status} label={connectionStatusLabel(status)} />
+        ) : null}
+        <span
+          className={`chevron${expanded ? ' open' : ''}${canConfigure ? '' : ' is-placeholder'}`}
+          aria-hidden={!canConfigure}
+        >
+          <Icon name="chevron" size={16} />
+        </span>
+      </span>
+    </>
+  );
 
   return (
     <section className="panel">
-      <button type="button" className="node-row" onClick={onToggle}>
-        <span
-          className="node-icon"
-          style={{ background: visual.bg, color: visual.color }}
-        >
-          {visual.letter}
-        </span>
-        <span className="node-copy">
-          <strong>{connector.name}</strong>
-          <span>{connector.description}</span>
-        </span>
-        <span className="node-row-meta">
-          <span className="chip mcp">MCP</span>
-          <StatusBadge status={status} label={connectionStatusLabel(status)} />
-          <span className={`chevron ${expanded ? 'open' : ''}`}>
-            <Icon name="chevron" size={16} />
-          </span>
-        </span>
-      </button>
-      {expanded ? (
+      {canConfigure ? (
+        <button type="button" className="node-row" onClick={onToggle}>
+          {row}
+        </button>
+      ) : (
+        <div className="node-row is-static">{row}</div>
+      )}
+      {canConfigure && expanded ? (
         <>
           <div className="chip-row">
             {connector.actions.map((action) => (
@@ -153,33 +258,17 @@ export const ConnectorCard = ({
           ) : null}
           {connector.id === 'llm' ? (
             <p className="muted">
-              Подключать не обязательно, если в .env задан GEMINI_API_KEY или
-              QWEN_API_KEY. Ключ в карточке нужен, только чтобы переопределить
-              окружение.
+              Подключать не обязательно, если в .env задан QWEN_API_KEY. Ключ в
+              карточке нужен, только чтобы переопределить окружение.
             </p>
           ) : null}
-          {connector.id === 'transform' ? (
-            <p className="muted">
-              Учётные данные не нужны. Фильтр, сортировка и сборка текста
-              выполняются локально.
-            </p>
+          {connector.id === 'telegram' ? (
+            <TelegramConnectGuide
+              onConnected={onRefresh}
+              onChanged={onRefresh}
+            />
           ) : null}
-          {connector.id === 'memory' ? (
-            <p className="muted">
-              Память между запусками этого workflow: intent, file_id голосового,
-              offset Telegram. Подключать ничего не нужно.
-            </p>
-          ) : null}
-          {connector.id === 'social' ? (
-            <p className="muted">
-              VK — access token. Instagram — Graph token и user id
-              профессионального аккаунта (Business Discovery). Просмотры чужих
-              Reels Graph не отдаёт: укажите HTTP-провайдер (base URL + ключ,
-              пути /followers и /reels). LinkedIn — только страницы компаний,
-              не личные профили. web.fetch эти сайты не открывает.
-            </p>
-          ) : null}
-          {connections.length ? (
+          {connector.id === 'telegram' ? null : connections.length ? (
             <ul className="connection-list">
               {connections.map((item) => (
                 <li key={item.id}>
@@ -233,72 +322,10 @@ export const ConnectorCard = ({
                 </li>
               ))}
             </ul>
-          ) : (
+          ) : kind === 'service' ? (
             <p className="muted">Аккаунт ещё не подключён</p>
-          )}
-          <form
-            className="stack"
-            onSubmit={(event) => {
-              event.preventDefault();
-              void save();
-            }}
-          >
-            {localError ? <Banner>{localError}</Banner> : null}
-            <label>
-              Название
-              <input
-                value={name}
-                onChange={(event) => setName(event.target.value)}
-              />
-            </label>
-            {connector.credentialFields.length === 0 ? (
-              <p className="muted">Этому коннектору не нужны учётные данные.</p>
-            ) : (
-              connector.credentialFields.map((field) => (
-                <label key={field.key}>
-                  {field.label}
-                  {field.type === 'select' && field.options?.length ? (
-                    <select
-                      value={form[field.key] ?? field.options[0].value}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          [field.key]: event.target.value,
-                        }))
-                      }
-                    >
-                      {field.options.map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <input
-                      type={
-                        field.secret || field.type === 'password'
-                          ? 'password'
-                          : field.type === 'number'
-                            ? 'number'
-                            : 'text'
-                      }
-                      placeholder={field.placeholder}
-                      value={form[field.key] ?? ''}
-                      onChange={(event) =>
-                        setForm((current) => ({
-                          ...current,
-                          [field.key]: event.target.value,
-                        }))
-                      }
-                    />
-                  )}
-                </label>
-              ))
-            )}
-            <Button type="submit" disabled={busy}>
-              {editingId ? 'Сохранить' : 'Подключить'}
-            </Button>
-          </form>
+          ) : null}
+          {connector.id === 'telegram' ? null : credentialForm}
         </>
       ) : null}
     </section>

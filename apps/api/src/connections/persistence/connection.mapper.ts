@@ -12,20 +12,30 @@ export const decryptCredentials = (
   }
 };
 
+const HIDDEN_CREDENTIAL_KEYS = new Set(['updateOffset']);
+
 export const toPublicConnection = (
   connection: Connection,
   key: string,
   secretFieldKeys: string[],
-) => ({
-  id: connection.id,
-  connectorId: connection.connectorId,
-  name: connection.name,
-  status: connection.status,
-  lastError: connection.lastError,
-  createdAt: connection.createdAt,
-  updatedAt: connection.updatedAt,
-  credentials: maskCredentials(
+) => {
+  const credentials = maskCredentials(
     decryptCredentials(connection, key),
     secretFieldKeys,
-  ),
-});
+  );
+
+  return {
+    id: connection.id,
+    connectorId: connection.connectorId,
+    name: connection.name,
+    status: connection.status,
+    lastError: connection.lastError,
+    createdAt: connection.createdAt,
+    updatedAt: connection.updatedAt,
+    credentials: Object.fromEntries(
+      Object.entries(credentials).filter(
+        ([field]) => !HIDDEN_CREDENTIAL_KEYS.has(field),
+      ),
+    ),
+  };
+};

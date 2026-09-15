@@ -7,12 +7,8 @@ const qwenNativeBase = (baseUrl?: string): string =>
     .replace(/\/+$/, '')
     .replace(/\/compatible-mode\/v1$/, '/api/v1');
 
-const qwenKeyFrom = (credentials?: Record<string, string>): string => {
-  const fromCredentials =
-    (credentials?.['provider'] || '') === 'qwen' ? credentials?.['apiKey'] : '';
-
-  return fromCredentials || process.env['QWEN_API_KEY'] || '';
-};
+const qwenKeyFrom = (credentials?: Record<string, string>): string =>
+  credentials?.['apiKey'] || process.env['QWEN_API_KEY'] || '';
 
 const asBuffer = (value: unknown): Buffer | null => {
   if (Buffer.isBuffer(value)) {
@@ -91,61 +87,6 @@ const transcribeQwen = async (
     .trim();
 };
 
-const transcribeGeminiInline = async (
-  apiKey: string,
-  model: string,
-  baseUrl: string,
-  buffer: Buffer,
-  mimeType: string,
-): Promise<string> => {
-  const base = (baseUrl || 'https://generativelanguage.googleapis.com/v1beta').replace(
-    /\/+$/,
-    '',
-  );
-  const response = await fetch(
-    `${base}/models/${model}:generateContent?key=${encodeURIComponent(apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        contents: [
-          {
-            role: 'user',
-            parts: [
-              {
-                inlineData: {
-                  mimeType: mimeType || 'audio/ogg',
-                  data: buffer.toString('base64'),
-                },
-              },
-              {
-                text: 'Расшифруй аудио в текст на языке оригинала. Верни только транскрипт, без пояснений.',
-              },
-            ],
-          },
-        ],
-        generationConfig: { temperature: 0 },
-      }),
-      signal: AbortSignal.timeout(60_000),
-    },
-  );
-  const body = (await response.json()) as {
-    error?: { message?: string };
-    candidates?: Array<{
-      content?: { parts?: Array<{ text?: string }> };
-    }>;
-  };
-
-  if (!response.ok) {
-    throw new Error(body.error?.message || `Gemini STT HTTP ${response.status}`);
-  }
-
-  return (body.candidates?.[0]?.content?.parts ?? [])
-    .map((part) => part.text || '')
-    .join('')
-    .trim();
-};
-
 export const transcribeAudio = async (options: {
   buffer: Buffer;
   filename?: string;
@@ -154,38 +95,13 @@ export const transcribeAudio = async (options: {
 }): Promise<string> => {
   const llm = resolveLlm(options.credentials);
   const mimeType = options.mimeType || 'audio/ogg';
+  const apiKey = llm.apiKey || qwenKeyFrom(options.credentials);
 
-  if (llm.provider === 'qwen' && llm.apiKey) {
-    return transcribeQwen(llm.apiKey, llm.baseUrl, options.buffer, mimeType);
+  if (!apiKey) {
+    throw new Error('Для распознавания голоса нужен QWEN_API_KEY');
   }
 
-  if (llm.apiKey) {
-    try {
-      return await transcribeGeminiInline(
-        llm.apiKey,
-        llm.model,
-        llm.baseUrl,
-        options.buffer,
-        mimeType,
-      );
-    } catch (error) {
-      const qwenKey = qwenKeyFrom(options.credentials);
-
-      if (!qwenKey) {
-        throw error;
-      }
-
-      return transcribeQwen(qwenKey, '', options.buffer, mimeType);
-    }
-  }
-
-  const qwenKey = qwenKeyFrom(options.credentials);
-
-  if (qwenKey) {
-    return transcribeQwen(qwenKey, '', options.buffer, mimeType);
-  }
-
-  throw new Error('Для распознавания голоса нужен GEMINI_API_KEY или QWEN_API_KEY');
+  return transcribeQwen(apiKey, llm.baseUrl, options.buffer, mimeType);
 };
 
 /** Явный язык Qwen TTS звучит заметно лучше, чем автоопределение. */

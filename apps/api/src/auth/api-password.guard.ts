@@ -14,7 +14,8 @@ const publicPath = (path: string) => {
     normalized === '/api/health' ||
     normalized === '/auth/status' ||
     normalized === '/api/auth/status' ||
-    /\/hooks\/[^/]+$/.test(normalized)
+    /\/hooks\/[^/]+$/.test(normalized) ||
+    /\/telegram\/webhook(\/[^/]+)?$/.test(normalized)
   );
 };
 

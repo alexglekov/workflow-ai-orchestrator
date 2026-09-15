@@ -9,6 +9,17 @@ export type TelegramMessage = {
   date?: number;
   message?: Record<string, unknown>;
   updateId?: number;
+  businessConnectionId?: string;
+};
+
+export type TelegramBusinessConnection = {
+  id: string;
+  userId: string;
+  userChatId: string;
+  username: string;
+  firstName: string;
+  canReply: boolean;
+  isEnabled: boolean;
 };
 
 const asRecord = (value: unknown): Record<string, unknown> =>
@@ -19,12 +30,56 @@ const asRecord = (value: unknown): Record<string, unknown> =>
 const nested = (value: unknown, key: string): Record<string, unknown> =>
   asRecord(asRecord(value)[key]);
 
+const canReplyFrom = (raw: Record<string, unknown>): boolean => {
+  if (raw['can_reply'] === true) {
+    return true;
+  }
+
+  const rights = asRecord(raw['rights']);
+
+  return (
+    rights['can_reply'] === true || rights['can_reply_to_messages'] === true
+  );
+};
+
+export const parseBusinessConnection = (
+  payload: unknown,
+): TelegramBusinessConnection | null => {
+  const root = asRecord(payload);
+  const wrapped = asRecord(root['business_connection']);
+  const raw =
+    wrapped['id'] || wrapped['user']
+      ? wrapped
+      : root['id'] && (root['user'] || root['user_chat_id'])
+        ? root
+        : {};
+  const id = String(raw['id'] || '');
+
+  if (!id) {
+    return null;
+  }
+
+  const user = asRecord(raw['user']);
+
+  return {
+    id,
+    userId: String(user['id'] || raw['user_chat_id'] || ''),
+    userChatId: String(raw['user_chat_id'] || user['id'] || ''),
+    username: String(user['username'] || ''),
+    firstName: String(user['first_name'] || ''),
+    canReply: canReplyFrom(raw),
+    isEnabled: raw['is_enabled'] !== false,
+  };
+};
+
 export const normalizeTelegramMessage = (
   payload: unknown,
 ): TelegramMessage | null => {
   const root = asRecord(payload);
   const message = asRecord(
-    root['message'] ||
+    root['business_message'] ||
+      root['edited_business_message'] ||
+      root['message'] ||
       root['edited_message'] ||
       nested(root['callback_query'], 'message') ||
       (root['chat'] ? root : null),
@@ -48,6 +103,12 @@ export const normalizeTelegramMessage = (
       '',
   );
   const voiceFileId = String(voice['file_id'] || root['voiceFileId'] || '');
+  const businessConnectionId = String(
+    message['business_connection_id'] ||
+      root['business_connection_id'] ||
+      root['businessConnectionId'] ||
+      '',
+  );
 
   return {
     chatId,
@@ -66,24 +127,27 @@ export const normalizeTelegramMessage = (
     message: Object.keys(message).length ? message : undefined,
     updateId:
       typeof root['update_id'] === 'number' ? root['update_id'] : undefined,
+    ...(businessConnectionId ? { businessConnectionId } : {}),
   };
 };
 
 export const looksLikeTelegramUpdate = (payload: unknown): boolean =>
-  Boolean(normalizeTelegramMessage(payload));
+  Boolean(normalizeTelegramMessage(payload) || parseBusinessConnection(payload));
 
 export const flattenTelegramInput = (
   payload: unknown,
 ): Record<string, unknown> => {
   const root = asRecord(payload);
   const normalized = normalizeTelegramMessage(payload);
+  const business = parseBusinessConnection(payload);
 
-  if (!normalized) {
+  if (!normalized && !business) {
     return root;
   }
 
   return {
     ...root,
-    ...normalized,
+    ...(normalized ?? {}),
+    ...(business ? { businessConnectionId: business.id } : {}),
   };
 };

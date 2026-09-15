@@ -1,6 +1,6 @@
 # AI Worker
 
-MVP: пользователь описывает задачу текстом, система собирает последовательность шагов и выполняет их через отдельные коннекторы (Mail, Telegram, 1С, Excel, Web, Browser, LLM, Transform, Memory, Social).
+MVP: пользователь описывает задачу текстом, система собирает последовательность шагов и выполняет их через отдельные коннекторы (Mail, Telegram, 1С, Excel, Web, Browser, LLM, Transform, Memory).
 
 Новый сервис добавляется как модуль в `libs/connectors` и регистрируется в registry. Ядро workflow (`libs/workflow`) и API не нужно переписывать.
 
@@ -71,17 +71,22 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 
 ### Telegram
 
-1. Создайте бота через [@BotFather](https://t.me/BotFather) и скопируйте токен.
-2. Напишите боту любое сообщение.
-3. Chat ID в подключении нужен для исходящих отчётов. В диалоге берётся из входящего (`{{item.chatId}}`).
+Каждая сессия — свой бот. Токен хранится в подключении, не в `.env`.
+
+1. В чате Fabula нажмите **Подключить Telegram**.
+2. Создайте бота в [@BotFather](https://t.me/BotFather), включите **Business Mode** (Bot Settings → Business) и вставьте токен.
+3. В Telegram: **Telegram для бизнеса → Чат-боты → @ваш_бот**.
+4. Включите «Новые чаты», «Не из контактов», «Ответы от вашего имени» и сохраните.
+
+Fabula получит `business_connection` и начнёт видеть диалоги с клиентами. Ответы уходят от вашего имени. Для webhook нужен `PUBLIC_API_URL` с https; иначе API опрашивает обновления каждого бота.
 
 Шаги:
 
-- `telegram.get_updates` — новые сообщения. Если workflow запущен webhook'ом Telegram, шаг заворачивает уже пришедший апдейт. `transcribe: true` распознаёт голосовые.
-- `telegram.send_message` — текст, `chatId` можно `{{item.chatId}}`
+- `telegram.get_updates` — новые сообщения (в том числе business). Если run стартовал с апдейта, шаг его заворачивает. `transcribe: true` распознаёт голосовые.
+- `telegram.send_message` — текст в чат клиента, `chatId` из `{{item.chatId}}`
 - `telegram.send_voice` — `fileId`, аудио с предыдущего шага или TTS из `text`. `memoryKey` запоминает `file_id`: тот же вопрос снова — то же голосовое.
 
-Триггер **Telegram**: при `PUBLIC_API_URL` с https бот регистрирует webhook; иначе опрос раз в минуту. Озвучка TTS — `QWEN_API_KEY`.
+Триггер **Telegram** подписывает workflow на входящие. Озвучка TTS — `QWEN_API_KEY`.
 
 ### Memory
 
@@ -121,14 +126,14 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 
 ### LLM (извлечение и текст)
 
-Работает во время запуска workflow, не только при сборке шагов. Ключ — из карточки коннектора или из `GEMINI_API_KEY` / `QWEN_API_KEY`.
+Работает во время запуска workflow, не только при сборке шагов. Ключ — из карточки коннектора или из `QWEN_API_KEY`.
 
 - `llm.extract` — текст/страница + JSON-схема → поля (`{"btcRub": number, ...}`)
 - `llm.classify` — одна метка из списка и короткое `reason`
 - `llm.generate` — написать текст по инструкции
-- `llm.transcribe` / `llm.speak` — речь ↔ текст (speak через Qwen TTS, распознавание — Gemini или Qwen ASR)
+- `llm.transcribe` / `llm.speak` — речь ↔ текст (speak через Qwen TTS, распознавание — Qwen ASR)
 
-Агентов два: **Gemini** (`GEMINI_API_KEY`) и **Qwen** (`QWEN_API_KEY` из Alibaba Model Studio). Ключ Qwen привязан к региону, поэтому `QWEN_BASE_URL` должен быть из того же региона. Режим «Авто» берёт первого доступного; если ключей нет ни у одного, запрос падает с явной ошибкой.
+Агент один: **Qwen** (`QWEN_API_KEY` из Alibaba Model Studio). Ключ привязан к региону, поэтому `QWEN_BASE_URL` должен быть из того же региона. Если ключа нет, запрос падает с явной ошибкой.
 
 Qwen TTS отдаёт WAV, а Telegram принимает голосовые только в OGG/Opus, поэтому нужен **ffmpeg**: в Docker он в образе, локально — `brew install ffmpeg`. Без него озвучка уйдёт обычным аудиофайлом, а не голосовым.
 
@@ -149,38 +154,23 @@ Qwen TTS отдаёт WAV, а Telegram принимает голосовые т�
 - `web.fetch` — скачать URL и вернуть текст и таблицы (`full: true` — вместе с меню и подвалом)
 - `web.rates` — BTC/LTC/USDT → RUB из `api.bestchange.ru/info.zip` (поля `btcRub`, `ltcRub`, `usdtRub` и готовый `text`)
 
-**Порядок источников:** сначала ключи (`BRAVE_API_KEY`, `GOOGLE_SEARCH_API_KEY` + `cx`, `SERPER_API_KEY`, `TAVILY_API_KEY`), затем выбранная модель — Gemini (встроенный Google Search) или Qwen (`enable_search`) по ключу из `GEMINI_API_KEY` / `QWEN_API_KEY`, затем бесплатные: DuckDuckGo Lite, Bing, Chromium, Brave, DuckDuckGo HTML, Mojeek и Wikipedia в самом конце. Ключи не обязательны, но с серверного IP бесплатные источники чаще режет анти-бот. Отключить поиск модели: в коннекторе Web `allowLlmSearch=false` или `provider: duckduckgo-lite`.
+**Порядок источников:** сначала ключи (`BRAVE_API_KEY`, `GOOGLE_SEARCH_API_KEY` + `cx`, `SERPER_API_KEY`, `TAVILY_API_KEY`), затем Qwen (`enable_search`) по ключу из `QWEN_API_KEY`, затем бесплатные: DuckDuckGo Lite, Bing, Chromium, Brave, DuckDuckGo HTML, Mojeek и Wikipedia в самом конце. Ключи не обязательны, но с серверного IP бесплатные источники чаще режет анти-бот. Отключить поиск модели: в коннекторе Web `allowLlmSearch=false` или `provider: duckduckgo-lite`.
 
 Выдача каждого источника сверяется с запросом: Bing и Brave умеют отвечать `200 OK` с результатами по чужому запросу, такой ответ считается отказом и поиск идёт дальше. Одинаковые запросы кэшируются на 5 минут, чтобы не упираться в лимиты.
 
 `web.search` возвращает `results[]` (`title`, `url`, `host`, `snippet`, `score`, `text`), `attempts[]` с причиной отказа каждого провайдера и готовый `text` для `llm.extract`. Выдача дедуплицируется, реклама и трекинг-параметры отбрасываются, один домен не занимает больше двух мест. По умолчанию догружается текст первых трёх страниц — `fetchContent: false` отключает. Если сработал только резерв, в ответе будет `degraded: true` и `warning`.
 
-Подключение необязательно, но без ключа поиск деградирует. Приватные адреса и localhost закрыты. Instagram/личные кабинеты этим шагом не открыть — для соцсетей коннектор **Social**.
+Подключение необязательно, но без ключа поиск деградирует. Приватные адреса и localhost закрыты. Instagram и личные кабинеты этим шагом не открыть.
 
 Пример курса: `web.rates` → `telegram.send_message`. Пример справки: `web.fetch` → `llm.extract` → `telegram.send_message`.
 
 ### Browser (Playwright)
 
-Страницы, где нужен JavaScript (SPA, часть P2P). Не замена Social и не парк аккаунтов.
+Страницы, где нужен JavaScript (SPA, часть P2P). Не парк аккаунтов.
 
 - `browser.open` — `url`, опционально `waitFor` (селектор), `waitUntil`, `actions` (`click` / `fill` / `press` / `wait`), `timeoutMs`
 - Chromium: локально `npx playwright install chromium`, в Docker уже лежит в образе. `browser.open` выполняет **worker**, но Chromium есть и в API — им пользуется проверка подключения Web.
 - Cookies: поле `storageState` в подключении (JSON Playwright). Частные URL — `allowPrivate=true`.
-
-### Social (VK / Instagram / LinkedIn)
-
-Официальные API, не `web.fetch`. Токены — в карточке коннектора или в `.env`.
-
-- `social.followers` — пачка профилей (URL, `@username` + сеть, или Excel с колонками VK/Instagram/LinkedIn). Текст отчёта: `ВК 10000\nИнстаграм 2500\nЛинкдин 800`
-- `social.reels` — ролики аккаунтов. `minViews` / `minLikes`, `sinceHours`, `newOnly` (уже виденные URL в memory). До 120 аккаунтов за шаг
-
-Ограничения:
-
-- **VK** — `users.get` / `groups.getById` (подписчики), короткие `video.get` как рилсы
-- **Instagram** — Graph Business Discovery: подписчики и медиа бизнес-аккаунтов. Просмотры чужих Reels Graph не отдаёт — лайки как оценка, либо HTTP-провайдер (`{base}/followers`, `{base}/reels`)
-- **LinkedIn** — только страницы компаний (`linkedin.com/company/...` или `company:ID`). Личные профили API не считает
-
-Цепочка утреннего отчёта: `social.followers` → `telegram.send_message`. Рилсы: `excel.read_rows` → `social.reels` → `llm.generate` (контекст) → `telegram.send_message`.
 
 ## Структура
 
@@ -201,7 +191,7 @@ apps/api/src
   triggers/       расписание и webhooks (только процесс API)
   health/ auth/
 apps/worker       Nx-цель `nx serve worker` (webpack → dist/apps/worker)
-libs/connectors   Mail, Telegram, OneC, Excel, Web, Browser, LLM, Transform, Memory, Social
+libs/connectors   Mail, Telegram, OneC, Excel, Web, Browser, LLM, Transform, Memory
 libs/workflow     разбор текста в шаги и sequential engine
 libs/data-access  Prisma + шифрование credentials
 infra/docker      PostgreSQL

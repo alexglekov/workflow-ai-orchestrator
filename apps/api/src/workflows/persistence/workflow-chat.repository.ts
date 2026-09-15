@@ -20,7 +20,7 @@ export class WorkflowChatRepository {
   listThread = (workflowId: string, thread: ChatThread) =>
     this.prisma.workflowChatMessage.findMany({
       where: { workflowId, thread },
-      orderBy: { createdAt: 'asc' },
+      orderBy: [{ createdAt: 'asc' }, { role: 'desc' }, { id: 'asc' }],
     });
 
   page = async (
@@ -38,7 +38,7 @@ export class WorkflowChatRepository {
       : null;
     const rows = await this.prisma.workflowChatMessage.findMany({
       where: { workflowId, thread },
-      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      orderBy: [{ createdAt: 'desc' }, { role: 'asc' }, { id: 'desc' }],
       ...(cursor ? { cursor: { id: cursor.id }, skip: 1 } : {}),
       take: take + 1,
     });
@@ -75,7 +75,13 @@ export class WorkflowChatRepository {
     }
 
     await this.prisma.$transaction(async (tx) => {
-      await tx.workflowChatMessage.createMany({ data: rows });
+      let at = Date.now();
+      for (const row of rows) {
+        await tx.workflowChatMessage.create({
+          data: { ...row, createdAt: new Date(at) },
+        });
+        at += 1;
+      }
 
       const extra = await tx.workflowChatMessage.findMany({
         where: { workflowId, thread },
@@ -87,6 +93,57 @@ export class WorkflowChatRepository {
       if (extra.length) {
         await tx.workflowChatMessage.deleteMany({
           where: { id: { in: extra.map((item) => item.id) } },
+        });
+      }
+    });
+  };
+
+  settle = async (
+    workflowId: string,
+    thread: ChatThread,
+    match: string,
+    options: { rewrite?: string; content?: string } = {},
+  ) => {
+    const needle = match.trim();
+
+    if (!needle) {
+      return;
+    }
+
+    await this.prisma.$transaction(async (tx) => {
+      const rows = await tx.workflowChatMessage.findMany({
+        where: { workflowId, thread, role: 'assistant' },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+      });
+      const hits = rows.filter((row) => row.content.includes(needle));
+      const rewrite = options.rewrite?.trim().slice(0, MAX_CONTENT);
+
+      if (rewrite) {
+        const target = hits.at(-1);
+
+        if (target) {
+          await tx.workflowChatMessage.update({
+            where: { id: target.id },
+            data: { content: rewrite },
+          });
+        }
+      } else if (hits.length) {
+        await tx.workflowChatMessage.deleteMany({
+          where: { id: { in: hits.map((row) => row.id) } },
+        });
+      }
+
+      const content = options.content?.trim().slice(0, MAX_CONTENT);
+
+      if (content) {
+        await tx.workflowChatMessage.create({
+          data: {
+            workflowId,
+            thread,
+            role: 'assistant',
+            content,
+            status: null,
+          },
         });
       }
     });

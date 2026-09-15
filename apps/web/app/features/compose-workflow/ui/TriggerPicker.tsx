@@ -11,7 +11,7 @@ const OPTIONS: Array<{
   type: TriggerType;
   title: string;
   hint: string;
-  icon: 'clock' | 'target' | 'link' | 'send';
+  icon: 'clock' | 'link';
   tone: 'green' | 'blue';
 }> = [
   {
@@ -20,20 +20,6 @@ const OPTIONS: Array<{
     hint: 'Интервал или время дня',
     icon: 'clock',
     tone: 'green',
-  },
-  {
-    type: 'mail',
-    title: 'Новые письма',
-    hint: 'Опрос IMAP по интервалу',
-    icon: 'target',
-    tone: 'blue',
-  },
-  {
-    type: 'telegram',
-    title: 'Telegram',
-    hint: 'Входящие сообщения бота',
-    icon: 'send',
-    tone: 'blue',
   },
   {
     type: 'webhook',
@@ -77,7 +63,10 @@ export const TriggerPicker = ({
         <div className="dialog-head">
           <div>
             <h2>Триггер</h2>
-            <p className="muted">Workflow запустится сам, без кнопки Run</p>
+            <p className="muted">
+              Расписание или webhook. Входящие письма и Telegram — это события
+              из шагов чата.
+            </p>
           </div>
           <button
             type="button"
@@ -115,24 +104,16 @@ export const TriggerPicker = ({
         {type === 'webhook' ? (
           <p className="muted">После создания появится URL для POST.</p>
         ) : (
-          <>
-            {type === 'telegram' ? (
-              <p className="muted">
-                Если PUBLIC_API_URL с https — бот получит webhook. Иначе опрос
-                getUpdates по интервалу ниже.
-              </p>
-            ) : null}
-            <TriggerTiming
-              everyMinutes={everyMinutes}
-              at={at}
-              timezone={timezone}
-              onChange={(next) => {
-                setEveryMinutes(next.everyMinutes);
-                setAt(next.at);
-                setTimezone(next.timezone);
-              }}
-            />
-          </>
+          <TriggerTiming
+            everyMinutes={everyMinutes}
+            at={at}
+            timezone={timezone}
+            onChange={(next) => {
+              setEveryMinutes(next.everyMinutes);
+              setAt(next.at);
+              setTimezone(next.timezone);
+            }}
+          />
         )}
         <div className="dialog-actions">
           <button type="button" className="btn ghost" onClick={onClose}>

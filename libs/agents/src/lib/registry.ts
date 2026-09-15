@@ -1,8 +1,6 @@
-import {
-  NO_AGENT_ERROR,
-  OrchestratorAgent,
-} from './providers/orchestrator.provider';
 import type { AgentCapability, AgentInfo, AgentProvider } from './types';
+
+export const NO_AGENT_ERROR = 'Нет доступного агента. Задайте QWEN_API_KEY.';
 
 export class AgentRegistry {
   private readonly agents = new Map<string, AgentProvider>();
@@ -31,25 +29,20 @@ export class AgentRegistry {
 
   resolve = (
     capability: AgentCapability,
-    providerId?: string,
+    _providerId?: string,
   ): AgentProvider => {
-    const orchestrator = this.get('orchestrator');
+    const requested = this.get('qwen');
 
-    if (orchestrator instanceof OrchestratorAgent) {
-      return orchestrator.pick(capability, providerId);
-    }
-
-    const requested = providerId ? this.get(providerId) : undefined;
-
-    if (requested?.available() && requested.capabilities.includes(capability)) {
+    if (
+      requested?.available() &&
+      requested.capabilities.includes(capability)
+    ) {
       return requested;
     }
 
     const fallback = this.list().find(
       (agent) =>
-        agent.id !== 'orchestrator' &&
-        agent.available() &&
-        agent.capabilities.includes(capability),
+        agent.available() && agent.capabilities.includes(capability),
     );
 
     if (!fallback) {

@@ -7,14 +7,16 @@ import {
   asRecord,
   firstNonEmpty,
   interpolate,
-  stringifyResult,
+  humanText,
 } from '../interpolate';
 import { bufferFromPrevious, speakText, transcribeAudio } from '../llm/audio';
 import { downloadTelegramFile, telegramCall, telegramUpload } from './api';
 import {
   normalizeTelegramMessage,
+  parseBusinessConnection,
   type TelegramMessage,
 } from './normalize';
+import { resolveBotToken } from './platform';
 
 const resolveChatId = (
   params: Record<string, unknown>,
@@ -30,6 +32,32 @@ const resolveChatId = (
     fromInput['chatId'],
     fromPrevious['chatId'],
   );
+};
+
+const resolveBusinessConnectionId = (
+  params: Record<string, unknown>,
+  credentials: Record<string, string>,
+  input: ConnectorExecuteInput,
+  chatId: string,
+): string => {
+  const fromInput = asRecord(input.context?.input);
+  const fromPrevious = asRecord(input.previousResult);
+  const ownerChatId = firstNonEmpty(
+    credentials['userChatId'],
+    credentials['chatId'],
+  );
+  const businessConnectionId = firstNonEmpty(
+    params['businessConnectionId'],
+    credentials['businessConnectionId'],
+    fromInput['businessConnectionId'],
+    fromPrevious['businessConnectionId'],
+  );
+
+  if (!businessConnectionId || (ownerChatId && chatId === ownerChatId)) {
+    return '';
+  }
+
+  return businessConnectionId;
 };
 
 const transcribeMessage = async (
@@ -65,11 +93,17 @@ const sendVoiceBuffer = async (
   chatId: string,
   buffer: Buffer,
   mimeType = 'audio/ogg',
+  businessConnectionId = '',
 ) => {
   const asVoice = mimeType === 'audio/ogg';
   const form = new FormData();
 
   form.append('chat_id', chatId);
+
+  if (businessConnectionId) {
+    form.append('business_connection_id', businessConnectionId);
+  }
+
   form.append(
     asVoice ? 'voice' : 'audio',
     new Blob([new Uint8Array(buffer)], { type: mimeType }),
@@ -86,7 +120,7 @@ export const telegramConnector: Connector = {
   id: 'telegram',
   name: 'Telegram',
   description:
-    'Входящие обновления, текст и голосовые. Chat ID в подключении — для исходящих отчётов, для диалога берётся из сообщения',
+    'Подключение через Telegram для бизнеса: диалоги клиентов и ответы от вашего имени',
   credentialFields: [
     {
       key: 'botToken',
@@ -105,7 +139,7 @@ export const telegramConnector: Connector = {
       id: 'get_updates',
       name: 'Получить входящие',
       description:
-        'Новые сообщения бота (long poll) или уже пришедший webhook. Голос можно расшифровать',
+        'Новые сообщения Telegram для бизнеса или бота. Голос можно расшифровать',
       paramsSchema: {
         transcribe: {
           type: 'boolean',
@@ -158,13 +192,50 @@ export const telegramConnector: Connector = {
     },
   ],
   testConnection: async (credentials) => {
-    const token = credentials['botToken'];
+    const token = resolveBotToken(credentials);
 
     if (!token) {
-      return { ok: false, error: 'Укажите токен бота' };
+      return {
+        ok: false,
+        error: 'Укажите токен бота в подключении',
+      };
     }
 
     try {
+      const businessId = credentials['businessConnectionId'];
+
+      if (businessId) {
+        const body = await telegramCall<Record<string, unknown>>(
+          token,
+          'getBusinessConnection',
+          { business_connection_id: businessId },
+        );
+
+        if (!body.ok) {
+          return {
+            ok: false,
+            error: body.description || 'Telegram getBusinessConnection failed',
+          };
+        }
+
+        const parsed = parseBusinessConnection(body.result);
+
+        if (!parsed?.isEnabled) {
+          return { ok: false, error: 'Telegram для бизнеса отключён' };
+        }
+
+        const label = parsed.username
+          ? `@${parsed.username}`
+          : parsed.firstName || 'ok';
+
+        return {
+          ok: true,
+          message: parsed.canReply
+            ? `Telegram для бизнеса ${label}`
+            : `Telegram для бизнеса ${label} (нет права отвечать от вашего имени)`,
+        };
+      }
+
       const body = await telegramCall<{ username?: string }>(token, 'getMe');
 
       if (!body.ok) {
@@ -187,17 +258,16 @@ export const telegramConnector: Connector = {
       input.params,
       input.context ?? input.previousResult,
     ) as Record<string, unknown>;
-    const token = input.credentials['botToken'];
+    const token = resolveBotToken(input.credentials);
 
     if (!token) {
-      return { ok: false, error: 'Не задан botToken' };
+      return { ok: false, error: 'Не задан токен бота в подключении' };
     }
 
     try {
       if (input.action === 'get_updates') {
         const transcribe =
           params['transcribe'] === true || params['transcribe'] === 'true';
-        const limit = Math.min(Math.max(Number(params['limit'] || 20) || 20, 1), 100);
         const fromHook = normalizeTelegramMessage(input.context?.input);
 
         if (fromHook) {
@@ -207,69 +277,17 @@ export const telegramConnector: Connector = {
 
           return {
             ok: true,
-            data: { count: 1, messages: [item], items: [item], source: 'webhook' },
+            data: { count: 1, messages: [item], items: [item], source: 'event' },
           };
         }
-
-        const stored = await input.runtime?.getState?.('telegram:offset');
-        const offset = Number(params['offset'] ?? stored ?? 0) || 0;
-        const body = await telegramCall<Array<Record<string, unknown>>>(
-          token,
-          'getUpdates',
-          {
-            offset,
-            timeout: 0,
-            limit,
-            allowed_updates: ['message', 'edited_message', 'callback_query'],
-          },
-        );
-
-        if (!body.ok) {
-          return {
-            ok: false,
-            error: body.description || 'Telegram getUpdates failed',
-          };
-        }
-
-        const updates = body.result ?? [];
-        const messages: TelegramMessage[] = [];
-
-        for (const update of updates) {
-          const item = normalizeTelegramMessage(update);
-
-          if (!item) {
-            continue;
-          }
-
-          messages.push(
-            transcribe
-              ? await transcribeMessage(token, item, input.credentials)
-              : item,
-          );
-        }
-
-        const lastId = updates.reduce((max, update) => {
-          const id = Number(update['update_id'] || 0);
-          return id > max ? id : max;
-        }, offset - 1);
-        const nextOffset = lastId >= 0 ? lastId + 1 : offset;
-
-        if (input.runtime?.setState && nextOffset !== offset) {
-          await input.runtime.setState('telegram:offset', nextOffset);
-        }
-
-        const first = messages[0];
 
         return {
           ok: true,
           data: {
-            count: messages.length,
-            messages,
-            items: messages,
-            nextOffset,
-            source: 'poll',
-            chatId: first?.chatId,
-            text: first?.text,
+            count: 0,
+            messages: [],
+            items: [],
+            source: 'event',
           },
         };
       }
@@ -277,16 +295,25 @@ export const telegramConnector: Connector = {
       if (input.action === 'send_message') {
         const chatId = resolveChatId(params, input.credentials, input);
         const text = String(
-          params['text'] || stringifyResult(input.previousResult) || 'Готово',
+          params['text'] || humanText(input.previousResult) || 'Готово',
         );
 
         if (!chatId) {
           return { ok: false, error: 'Не задан chatId' };
         }
 
+        const businessConnectionId = resolveBusinessConnectionId(
+          params,
+          input.credentials,
+          input,
+          chatId,
+        );
         const body = await telegramCall(token, 'sendMessage', {
           chat_id: chatId,
           text: text.slice(0, 4000),
+          ...(businessConnectionId
+            ? { business_connection_id: businessConnectionId }
+            : {}),
         });
 
         if (!body.ok) {
@@ -318,10 +345,20 @@ export const telegramConnector: Connector = {
         let usedFileId = fileId;
         let cachedHit = Boolean(cachedId) && cachedId === fileId;
 
+        const businessConnectionId = resolveBusinessConnectionId(
+          params,
+          input.credentials,
+          input,
+          chatId,
+        );
+
         if (fileId) {
           const body = await telegramCall(token, 'sendVoice', {
             chat_id: chatId,
             voice: fileId,
+            ...(businessConnectionId
+              ? { business_connection_id: businessConnectionId }
+              : {}),
           });
 
           if (!body.ok) {
@@ -368,7 +405,13 @@ export const telegramConnector: Connector = {
           mimeType = spoken.mimeType;
         }
 
-        const uploaded = await sendVoiceBuffer(token, chatId, buffer, mimeType);
+        const uploaded = await sendVoiceBuffer(
+          token,
+          chatId,
+          buffer,
+          mimeType,
+          businessConnectionId,
+        );
 
         if (!uploaded.ok) {
           return {

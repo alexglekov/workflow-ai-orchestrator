@@ -1,8 +1,4 @@
-import {
-  describeGeminiError,
-  describeQwenError,
-  type LlmProviderId,
-} from './complete';
+import { describeQwenError, type LlmProviderId } from './complete';
 import { resolveLlm, type ResolvedLlm } from './resolve';
 import type { SearchHit } from '../web/rank';
 
@@ -36,92 +32,6 @@ const fetchJson = async (url: string, init: RequestInit) => {
   const body = (await response.json()) as Record<string, unknown>;
 
   return { response, body };
-};
-
-const geminiSearch = async (
-  llm: ResolvedLlm,
-  query: string,
-): Promise<GroundedSearch> => {
-  const base = llm.baseUrl.replace(/\/+$/, '');
-  const prompt = [
-    'Найди актуальную информацию в Google и ответь по существу.',
-    'Укажи конкретные числа, даты и факты. Не пиши код.',
-    `Запрос: ${query}`,
-  ].join('\n');
-
-  const payload = {
-    contents: [{ role: 'user', parts: [{ text: prompt }] }],
-    tools: [{ googleSearch: {} }],
-    generationConfig: { temperature: 0.2 },
-  };
-
-  let { response, body } = await fetchJson(
-    `${base}/models/${llm.model}:generateContent?key=${encodeURIComponent(llm.apiKey)}`,
-    {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    },
-  );
-
-  if (!response.ok && /google.?search/i.test(String((body['error'] as { message?: string })?.message))) {
-    ({ response, body } = await fetchJson(
-      `${base}/models/${llm.model}:generateContent?key=${encodeURIComponent(llm.apiKey)}`,
-      {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...payload,
-          tools: [{ google_search: {} }],
-        }),
-      },
-    ));
-  }
-
-  if (!response.ok) {
-    throw new Error(
-      describeGeminiError(
-        response.status,
-        (body['error'] as { message?: string } | undefined)?.message,
-      ),
-    );
-  }
-
-  const candidate = (body['candidates'] as Array<{
-    content?: { parts?: Array<{ text?: string }> };
-    groundingMetadata?: {
-      webSearchQueries?: string[];
-      groundingChunks?: Array<{ web?: { uri?: string; title?: string } }>;
-    };
-  }>)?.[0];
-  const text = (candidate?.content?.parts ?? [])
-    .map((part) => part.text || '')
-    .join('')
-    .trim();
-  const chunks = candidate?.groundingMetadata?.groundingChunks ?? [];
-  const results = chunks
-    .map((chunk) =>
-      hit(
-        'gemini',
-        chunk.web?.title || query,
-        chunk.web?.uri || '',
-        text.slice(0, 280),
-        text,
-      ),
-    )
-    .filter((item) => /^https?:\/\//i.test(item.url));
-
-  if (!text && !results.length) {
-    throw new Error('Gemini Search вернул пустой ответ');
-  }
-
-  if (!results.length && text) {
-    results.push(
-      hit('gemini', query, 'https://www.google.com/search?q=' + encodeURIComponent(query), text, text),
-    );
-  }
-
-  return { provider: 'gemini', text, results };
 };
 
 type QwenSearchResult = {
@@ -207,7 +117,13 @@ const qwenSearch = async (
 
   if (!results.length && text) {
     results.push(
-      hit('qwen', query, 'https://www.google.com/search?q=' + encodeURIComponent(query), text, text),
+      hit(
+        'qwen',
+        query,
+        'https://www.google.com/search?q=' + encodeURIComponent(query),
+        text,
+        text,
+      ),
     );
   }
 
@@ -219,16 +135,8 @@ export const groundedWebSearch = async (
   llm: ResolvedLlm = resolveLlm(),
 ): Promise<GroundedSearch> => {
   if (!llm.apiKey) {
-    throw new Error(
-      llm.provider === 'qwen'
-        ? 'Нет QWEN_API_KEY для поиска модели'
-        : 'Нет GEMINI_API_KEY для поиска модели',
-    );
+    throw new Error('Нет QWEN_API_KEY для поиска модели');
   }
 
-  if (llm.provider === 'qwen') {
-    return qwenSearch(llm, query);
-  }
-
-  return geminiSearch(llm, query);
+  return qwenSearch(llm, query);
 };

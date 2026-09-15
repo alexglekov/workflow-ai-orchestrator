@@ -23,8 +23,6 @@ const PIPELINE = [
   'web.rates',
   'excel.find_file',
   'excel.read_rows',
-  'social.followers',
-  'social.reels',
   'onec.query',
   'onec.get',
   'transform.filter',
@@ -57,10 +55,6 @@ const ACTION_HINTS: Record<string, string> = {
     'браузер playwright javascript spa p2p клик логин chromium',
   'web.rates':
     'курс bestchange btc ltc usdt p2p биржа обменник',
-  'social.followers':
-    'подписчики followers вк vk instagram инстаграм linkedin линкдин утро отчёт соцсети',
-  'social.reels':
-    'рилс reels вирус залетел просмотры instagram инстаграм ролики аккаунтов',
   'excel.find_file': 'найди файл диск drive яндекс google xlsx',
   'excel.read_rows': 'прочитай прочитать строки лист таблицу excel счета',
   'excel.append_row': 'добавь допиши запиши строку в таблицу excel',
@@ -97,12 +91,11 @@ const CONNECTOR_HINTS: Record<string, string> = {
   web: 'сайт веб web инн inn http https курс bestchange справочн гугл',
   browser: 'браузер playwright javascript spa p2p chromium',
   excel: 'excel эксель таблица xlsx диск счета',
-  llm: 'llm нейросеть извлечь классифицировать сгенерировать gpt gemini голос',
+  llm: 'llm нейросеть извлечь классифицировать сгенерировать gpt qwen голос',
   transform: 'фильтр шаблон отчёт преобразовать transform',
   memory: 'память memory ключ повтор',
   onec: '1с 1c onec crm контрагент инн лид задача счета',
   telegram: 'телеграм telegram бот входящие диалог голос voice',
-  social: 'подписчики вк vk instagram инстаграм linkedin линкдин рилс reels соцсети',
 };
 
 const LIST_PRODUCERS = new Set([
@@ -121,8 +114,6 @@ const NEVER_ITERATE = new Set([
   'web.fetch',
   'browser.open',
   'web.rates',
-  'social.followers',
-  'social.reels',
   'telegram.get_updates',
   'onec.query',
   'transform.filter',
@@ -192,12 +183,6 @@ const isSocialUrl = (url: string): boolean =>
   /(?:instagram\.com|instagr\.am|vk\.com|vkontakte\.ru|linkedin\.com)/i.test(
     url,
   );
-
-const socialProfilesFromPrompt = (prompt: string): string =>
-  (prompt.match(/https?:\/\/[^\s)\]>'"]+/gi) || [])
-    .map((item) => item.replace(/[.,;]+$/u, ''))
-    .filter(isSocialUrl)
-    .join('\n');
 
 const firstEmail = (prompt: string): string =>
   prompt.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] || '';
@@ -425,29 +410,6 @@ const fillParams = (
     }
   }
 
-  if (connectorId === 'social' && actionId === 'followers') {
-    const profiles = socialProfilesFromPrompt(prompt);
-
-    return profiles ? { profiles } : {};
-  }
-
-  if (connectorId === 'social' && actionId === 'reels') {
-    const views = prompt.match(
-      /(?:просмотр|views|залетел[ао]?\s*(?:от)?)\s*(\d[\d\s]*)/i,
-    );
-    const hours = prompt.match(/за\s+(\d+)\s*час/i);
-    const profiles = socialProfilesFromPrompt(prompt);
-
-    return {
-      newOnly: true,
-      ...(profiles ? { accounts: profiles } : {}),
-      ...(views?.[1]
-        ? { minViews: Number(views[1].replace(/\s/g, '')) }
-        : {}),
-      ...(hours?.[1] ? { sinceHours: Number(hours[1]) } : {}),
-    };
-  }
-
   if (connectorId === 'telegram' && actionId === 'get_updates') {
     return { transcribe: true, limit: 20 };
   }
@@ -469,11 +431,8 @@ const fillParams = (
     const hasRates = selected.some(
       (step) => step.connectorId === 'web' && step.action === 'rates',
     );
-    const hasFollowers = selected.some(
-      (step) => step.connectorId === 'social' && step.action === 'followers',
-    );
 
-    if (hasFollowers || hasRates) {
+    if (hasRates) {
       return {
         text: '{{previous.text}}',
         skipIfEmpty: true,
@@ -662,24 +621,6 @@ export const planFromCatalog = (
 
   if (wantsMailSearch) {
     withFetch = ensureAction(withFetch, 'mail', 'search');
-  }
-
-  const wantsReels = /рилс|reels|вирусн|залет/i.test(text);
-  const wantsFollowers =
-    /подписчик|followers/i.test(text) ||
-    (/(instagram|инстаграм|вконтакте|\bвк\b|\bvk\b|linkedin|линкдин)/i.test(
-      text,
-    ) &&
-      /отчёт|отчет|утром|каждое утро|пришли/i.test(text));
-
-  if (wantsReels) {
-    withFetch = ensureAction(withFetch, 'social', 'reels');
-
-    if (/контекст|опиши|саммари|комментар/i.test(text)) {
-      withFetch = ensureAction(withFetch, 'llm', 'generate');
-    }
-  } else if (wantsFollowers) {
-    withFetch = ensureAction(withFetch, 'social', 'followers');
   }
 
   if (

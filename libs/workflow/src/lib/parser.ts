@@ -117,14 +117,6 @@ export const fallbackParse = (
         { id: 'send_voice', name: 'Отправить голосовое' },
       ],
     },
-    {
-      id: 'social',
-      name: 'Social',
-      actions: [
-        { id: 'followers', name: 'Подписчики' },
-        { id: 'reels', name: 'Рилсы' },
-      ],
-    },
   ]);
 };
 
@@ -152,8 +144,8 @@ export const parsePromptToSteps = async (
 Доступные коннекторы и параметры: ${JSON.stringify(catalogJson(connectors))}.
 Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{},"iterate":false}]}.
 Параметры бери из текста пользователя. Данные между шагами: {{previous.field}}, {{item.field}}, {{input.field}}, {{steps.1.field}}.
-iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates, social.followers, social.reels и onec.query без iterate.
-Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Instagram/VK/LinkedIn — social. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
+iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates и onec.query без iterate.
+Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
         },
         { role: 'user', content: prompt },
       ],
