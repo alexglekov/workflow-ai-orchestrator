@@ -4,4 +4,5 @@ export * from './lib/catalog-plan';
 export * from './lib/when';
 export * from './lib/side-effects';
 export * from './lib/schedule-intent';
+export * from './lib/starter';
 export { runWorkflow } from './lib/engine';
