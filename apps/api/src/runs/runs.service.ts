@@ -104,6 +104,8 @@ export class RunsService {
 
   hasActive = (workflowId: string) => this.runs.hasActive(workflowId);
 
+  cancelActive = (workflowId: string) => this.runs.cancelActive(workflowId);
+
   claimNext = (workerId: string) => this.runs.claimNext(workerId);
 
   executeClaimed = async (runId: string) => {

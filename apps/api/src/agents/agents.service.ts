@@ -21,6 +21,7 @@ import {
   isStopIntent,
   isLaunchIntent,
   STATUS_STOPPED_MARK,
+  LAUNCH_MARK,
   launchedStatusMessage,
   parseTelegramKindIntent,
   resolveTelegramKind,
@@ -146,8 +147,12 @@ export class AgentsService {
 
           await this.workflows.appendChat(dto.workflowId, 'build', [
             { role: 'user', content: message },
-            { role: 'assistant', content },
           ]);
+          await this.workflows.settleChat(dto.workflowId, {
+            thread: 'build',
+            match: LAUNCH_MARK,
+            content,
+          });
 
           return {
             kind: 'questions',

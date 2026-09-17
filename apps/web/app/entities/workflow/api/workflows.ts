@@ -37,6 +37,18 @@ export const settleWorkflowChat = (
     body: JSON.stringify(payload),
   });
 
+export const startWorkflowLive = (workflowId: string) =>
+  http<{ started: number }>(`/workflows/${workflowId}/live/start`, {
+    method: 'POST',
+    body: '{}',
+  });
+
+export const stopWorkflowLive = (workflowId: string) =>
+  http<{ stopped: number }>(`/workflows/${workflowId}/live/stop`, {
+    method: 'POST',
+    body: '{}',
+  });
+
 export const updateWorkflow = (
   id: string,
   payload: {

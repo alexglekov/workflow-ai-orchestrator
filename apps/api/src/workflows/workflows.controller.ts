@@ -61,6 +61,16 @@ export class WorkflowsController {
     });
   }
 
+  @Post(':id/live/start')
+  async startLive(@Param('id') id: string) {
+    return { started: await this.workflows.startLive(id) };
+  }
+
+  @Post(':id/live/stop')
+  async stopLive(@Param('id') id: string) {
+    return { stopped: await this.workflows.stopLive(id) };
+  }
+
   @Post(':id/chat/settle')
   @HttpCode(204)
   settleChat(@Param('id') id: string, @Body() dto: SettleChatDto) {

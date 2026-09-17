@@ -64,6 +64,8 @@ export class RunsRepository {
     return Boolean(found);
   };
 
+  cancelActive = (workflowId: string) => this.cancelActiveExcept(workflowId, '');
+
   cancelActiveExcept = async (workflowId: string, exceptId: string) => {
     const pending = await this.prisma.run.findMany({
       where: {

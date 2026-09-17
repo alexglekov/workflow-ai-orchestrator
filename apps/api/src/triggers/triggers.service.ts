@@ -220,6 +220,7 @@ export class TriggersService {
   };
 
   disableLive = async (workflowId: string) => {
+    await this.runs.cancelActive(workflowId);
     const current = await this.triggers.listByWorkflow(workflowId);
     const live = current.filter(
       (item) =>
@@ -237,6 +238,7 @@ export class TriggersService {
   };
 
   enableLive = async (workflowId: string) => {
+    await this.runs.cancelActive(workflowId);
     const current = await this.triggers.listByWorkflow(workflowId);
     const targets = current.filter(
       (item) =>

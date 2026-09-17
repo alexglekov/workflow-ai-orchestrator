@@ -191,7 +191,7 @@ export const AskThread = ({
         const enterKey = messageKey(item, index);
         const run = parsed.runId ? runs[parsed.runId] : undefined;
         const launched =
-          parsed.status === 'launched' || (Boolean(parsed.launch) && live);
+          parsed.status === 'launched';
         const showLaunch =
           item.role === 'assistant' &&
           parsed.launch &&
@@ -199,14 +199,12 @@ export const AskThread = ({
           !live &&
           parsed.status !== 'launched';
         const displayText =
-          launched && parsed.status !== 'launched' && parsed.launch
+          launched && /^запущено\.?$/i.test(parsed.text)
             ? ''
-            : launched && /^запущено\.?$/i.test(parsed.text)
+            : parsed.status === 'stopped' &&
+                /^остановлено\.?$/i.test(parsed.text)
               ? ''
-              : parsed.status === 'stopped' &&
-                  /^остановлено\.?$/i.test(parsed.text)
-                ? ''
-                : parsed.text;
+              : parsed.text;
         const shown =
           item.role === 'assistant' && displayText
             ? humanizeOutput(displayText) || displayText

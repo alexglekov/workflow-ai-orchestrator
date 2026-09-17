@@ -34,6 +34,8 @@ import {
   workflowAtom,
   appendWorkflowChat,
   settleWorkflowChat,
+  startWorkflowLive,
+  stopWorkflowLive,
   type WorkflowStep,
 } from '~/entities/workflow';
 import {
@@ -585,9 +587,6 @@ export const WorkflowEditorPage = () => {
       current.steps.length > 0 &&
       missing.length === 0 &&
       liveTriggersOf(triggers).length > 0;
-    const active = Object.values(runs).filter(
-      (item) => item.status === 'pending' || item.status === 'running',
-    );
 
     setMode('build');
     setMobileTab('chat');
@@ -608,9 +607,9 @@ export const WorkflowEditorPage = () => {
       return;
     }
 
-    if (alreadyLive || active.length) {
+    if (alreadyLive) {
       await settleThread('build', LAUNCH_MARK, {
-        content: launchedStatusMessage(active[0]?.id),
+        content: launchedStatusMessage(),
       });
       return;
     }
@@ -619,22 +618,10 @@ export const WorkflowEditorPage = () => {
 
     try {
       await persist(current.steps);
-      const synced = await fetchTriggers(id).catch(() => triggers);
-      const toStart = synced.filter(
-        (item) =>
-          !item.enabled &&
-          (item.type === 'schedule' || isEventTrigger(item.type)),
-      );
-      const timedOrEvents = synced.filter(
-        (item) =>
-          item.type === 'schedule' || isEventTrigger(item.type),
-      );
+      const { started } = await startWorkflowLive(id);
+      setTriggers(await fetchTriggers(id).catch(() => triggers));
 
-      if (timedOrEvents.length) {
-        await Promise.all(
-          toStart.map((item) => updateTrigger(item.id, { enabled: true })),
-        );
-        setTriggers(await fetchTriggers(id).catch(() => synced));
+      if (started > 0) {
         await settleThread('build', LAUNCH_MARK, {
           content: launchedStatusMessage(),
         });
@@ -664,17 +651,14 @@ export const WorkflowEditorPage = () => {
     setStopping(true);
 
     try {
-      const live = liveTriggersOf(triggers);
       const active = Object.values(runs).filter(
         (item) => item.status === 'pending' || item.status === 'running',
       );
 
-      await Promise.all(
-        live.map((item) => updateTrigger(item.id, { enabled: false })),
-      );
+      await stopWorkflowLive(id);
 
       const cancelled = await Promise.all(
-        active.map((item) => cancelRun(item.id)),
+        active.map((item) => cancelRun(item.id).catch(() => item)),
       );
 
       setRuns((current) => {
@@ -785,11 +769,7 @@ export const WorkflowEditorPage = () => {
         messages: [{ role: 'user', content: message }],
       }).catch(() => undefined);
 
-      const alreadyLive =
-        liveTriggersOf(triggers).length > 0 ||
-        Object.values(runs).some(
-          (item) => item.status === 'pending' || item.status === 'running',
-        );
+      const alreadyLive = liveTriggersOf(triggers).length > 0;
 
       if (alreadyLive) {
         await postAssistant(

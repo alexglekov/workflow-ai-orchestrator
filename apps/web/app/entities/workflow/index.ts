@@ -11,4 +11,6 @@ export {
   createDemoWorkflow,
   deleteWorkflow,
   clearWorkflows,
+  startWorkflowLive,
+  stopWorkflowLive,
 } from './api/workflows';
