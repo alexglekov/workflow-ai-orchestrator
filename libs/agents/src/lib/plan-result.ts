@@ -3,6 +3,7 @@ import type {
   AgentPlanResult,
   AgentPlannedStep,
 } from './types';
+import { clampScheduleIntent } from '@ai-worker/workflow';
 
 const stripFences = (text: string): string =>
   text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/u, '').trim();
@@ -40,6 +41,9 @@ const asQuestions = (value: unknown): string[] => {
     .slice(0, 3);
 };
 
+const asTelegramKind = (value: unknown): AgentPlanResult['telegramKind'] =>
+  value === 'bot' || value === 'business' ? value : undefined;
+
 export const parsePlanResponse = (
   text: string,
   providerId: string,
@@ -51,6 +55,8 @@ export const parsePlanResponse = (
       questions?: unknown;
       connectors?: unknown;
       name?: string;
+      telegramKind?: unknown;
+      schedule?: unknown;
       steps?: unknown;
     };
     const questions = asQuestions(parsed.questions);
@@ -59,6 +65,7 @@ export const parsePlanResponse = (
       parsed.kind === 'questions' || (questions.length > 0 && steps.length === 0)
         ? 'questions'
         : 'workflow';
+    const schedule = clampScheduleIntent(parsed.schedule);
 
     return {
       kind,
@@ -69,6 +76,8 @@ export const parsePlanResponse = (
         ? parsed.connectors.map((item) => String(item))
         : steps.map((step) => step.connectorId),
       name: parsed.name ? String(parsed.name) : undefined,
+      telegramKind: asTelegramKind(parsed.telegramKind),
+      schedule: schedule ?? undefined,
       steps,
     };
   } catch {
@@ -137,6 +146,9 @@ export const sanitizePlan = (
     return [{ ...step, action }];
   });
   const connectors = [...new Set(steps.map((step) => step.connectorId))];
+  const telegramKind = connectors.includes('telegram')
+    ? plan.telegramKind
+    : undefined;
 
   if (plan.kind === 'questions') {
     const questions =
@@ -149,6 +161,7 @@ export const sanitizePlan = (
       kind: 'questions',
       steps: [],
       connectors: [],
+      telegramKind: plan.telegramKind,
       questions,
       message:
         plan.message ||
@@ -175,6 +188,7 @@ export const sanitizePlan = (
     kind: 'workflow',
     steps,
     connectors,
+    telegramKind,
     message:
       plan.message ||
       `Собрал цепочку: ${connectors.join(' → ')}.`,

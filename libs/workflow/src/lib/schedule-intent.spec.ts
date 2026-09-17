@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
 import {
+  looksLikeSchedule,
   parseScheduleIntent,
   scheduleIntentLabel,
 } from './schedule-intent';
@@ -29,6 +30,17 @@ describe('parseScheduleIntent', () => {
     assert.deepEqual(parseScheduleIntent('каждый час'), {
       everyMinutes: 60,
     });
+    assert.deepEqual(
+      parseScheduleIntent(
+        'Собери курс BTC/USDT с binance и отправь мне в тг кажлый час',
+      ),
+      { everyMinutes: 60 },
+    );
+    assert.deepEqual(
+      parseScheduleIntent('отправляй мне эти данные кждый час'),
+      { everyMinutes: 60 },
+    );
+    assert.deepEqual(parseScheduleIntent('раз в час'), { everyMinutes: 60 });
   });
 
   it('reads a daily clock time', () => {
@@ -45,6 +57,11 @@ describe('parseScheduleIntent', () => {
   it('ignores unrelated minutes and 1C', () => {
     assert.equal(parseScheduleIntent('подожди минуту и найди в 1С'), null);
     assert.equal(parseScheduleIntent('создай запись в 1С'), null);
+  });
+
+  it('detects messy schedule phrasing', () => {
+    assert.equal(looksLikeSchedule('кажлый час в тг'), true);
+    assert.equal(looksLikeSchedule('подожди минуту и найди в 1С'), false);
   });
 
   it('labels the intent', () => {

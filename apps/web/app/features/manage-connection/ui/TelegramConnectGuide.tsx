@@ -3,7 +3,9 @@ import { deleteConnection } from '~/entities/connection';
 import {
   fetchTelegramStatus,
   registerTelegram,
+  setTelegramKind,
   type TelegramBotHealth,
+  type TelegramKind,
   type TelegramStatus,
 } from '~/entities/telegram';
 import { Button } from '~/shared/ui/Button';
@@ -25,6 +27,9 @@ const emptyStatus = (): TelegramStatus => ({
 const botHandle = (username: string) =>
   username ? `@${username.replace(/^@/, '')}` : '';
 
+const botKindLabel = (kind: TelegramKind) =>
+  kind === 'business' ? 'аккаунт' : 'бот';
+
 const botBadge = (bot: TelegramBotHealth) => {
   if (bot.state === 'connected') {
     return { status: 'connected', label: 'подключено' };
@@ -34,7 +39,7 @@ const botBadge = (bot: TelegramBotHealth) => {
     return { status: 'error', label: 'ошибка' };
   }
 
-  return { status: 'disconnected', label: 'не подключено' };
+  return { status: 'disconnected', label: 'ждём аккаунт' };
 };
 
 const botStateText = (bot: TelegramBotHealth) => {
@@ -45,13 +50,21 @@ const botStateText = (bot: TelegramBotHealth) => {
   }
 
   if (bot.state === 'connected') {
+    if (bot.kind === 'bot') {
+      return handle
+        ? `${handle} готов как обычный бот`
+        : 'Обычный бот готов';
+    }
+
     if (!bot.canReply) {
       return handle
         ? `${handle} подключён, но нет права «Ответы от вашего имени».`
         : 'Подключён, но нет права «Ответы от вашего имени».';
     }
 
-    return handle ? `${handle} подключён` : 'Подключён через Telegram для бизнеса';
+    return handle
+      ? `${handle} подключён к аккаунту`
+      : 'Подключён через Telegram для бизнеса';
   }
 
   return handle
@@ -76,43 +89,59 @@ const GuideSteps = ({
   </ol>
 );
 
-const CREATE_STEPS: Array<{ state: 'done' | 'now' | 'todo'; text: ReactNode }> = [
-  {
-    state: 'now',
-    text: (
-      <>
-        Откройте <strong>@BotFather</strong> и отправьте <strong>/newbot</strong>
-      </>
-    ),
-  },
-  {
-    state: 'todo',
-    text: 'В настройках бота включите Business Mode: Bot Settings → Business',
-  },
-  {
-    state: 'todo',
-    text: 'Скопируйте токен и вставьте его ниже',
-  },
-  {
-    state: 'todo',
-    text: (
-      <>
-        Откройте Telegram → <strong>Telegram для бизнеса</strong> →{' '}
-        <strong>Чат-боты</strong>
-      </>
-    ),
-  },
-  {
-    state: 'todo',
-    text: 'Введите имя бота и нажмите «Продолжить»',
-  },
-  {
-    state: 'todo',
-    text: 'Включите «Новые чаты», «Не из контактов», «Ответы от вашего имени» и нажмите «Сохранить»',
-  },
-];
-
 type GuideStep = { state: 'done' | 'now' | 'todo'; text: ReactNode };
+
+const createSteps = (kind: TelegramKind): GuideStep[] => {
+  const botFather: GuideStep[] = [
+    {
+      state: 'now',
+      text: (
+        <>
+          Откройте <strong>@BotFather</strong> и отправьте <strong>/newbot</strong>
+        </>
+      ),
+    },
+  ];
+
+  if (kind === 'bot') {
+    return [
+      ...botFather,
+      {
+        state: 'todo',
+        text: 'Скопируйте токен и вставьте его ниже — бот сразу начнёт работать',
+      },
+    ];
+  }
+
+  return [
+    ...botFather,
+    {
+      state: 'todo',
+      text: 'В настройках бота включите Business Mode: Bot Settings → Business',
+    },
+    {
+      state: 'todo',
+      text: 'Скопируйте токен и вставьте его ниже',
+    },
+    {
+      state: 'todo',
+      text: (
+        <>
+          Откройте Telegram → <strong>Telegram для бизнеса</strong> →{' '}
+          <strong>Чат-боты</strong>
+        </>
+      ),
+    },
+    {
+      state: 'todo',
+      text: 'Введите имя бота и нажмите «Продолжить»',
+    },
+    {
+      state: 'todo',
+      text: 'Включите «Новые чаты», «Не из контактов», «Ответы от вашего имени» и нажмите «Сохранить»',
+    },
+  ];
+};
 
 const botProgress = (bot: TelegramBotHealth): GuideStep[] => {
   const handle = botHandle(bot.username);
@@ -131,6 +160,21 @@ const botProgress = (bot: TelegramBotHealth): GuideStep[] => {
             ниже
           </>
         ),
+      },
+    ];
+  }
+
+  if (bot.kind === 'bot') {
+    return [
+      {
+        state: 'done',
+        text: handle
+          ? `Бот ${handle} создан, токен сохранён`
+          : 'Бот создан, токен сохранён',
+      },
+      {
+        state: 'done',
+        text: 'Обычный бот готов: сообщения в чате с ботом',
       },
     ];
   }
@@ -188,21 +232,56 @@ const botProgress = (bot: TelegramBotHealth): GuideStep[] => {
   ];
 };
 
+const KindPicker = ({
+  value,
+  onChange,
+}: {
+  value: TelegramKind;
+  onChange: (kind: TelegramKind) => void;
+}) => (
+  <div className="telegram-kind-pick" role="radiogroup" aria-label="Тип бота">
+    <button
+      type="button"
+      className={value === 'bot' ? 'is-active' : ''}
+      aria-pressed={value === 'bot'}
+      onClick={() => onChange('bot')}
+    >
+      <strong>Обычный бот</strong>
+      <span>Отвечает в чате с ботом сразу после токена</span>
+    </button>
+    <button
+      type="button"
+      className={value === 'business' ? 'is-active' : ''}
+      aria-pressed={value === 'business'}
+      onClick={() => onChange('business')}
+    >
+      <strong>Бот для аккаунта</strong>
+      <span>Диалоги клиентов и ответы от вашего имени</span>
+    </button>
+  </div>
+);
+
 export const TelegramConnectGuide = ({
   variant = 'card',
   fresh = false,
+  preferredKind,
   onClose,
   onConnected,
   onChanged,
 }: {
   variant?: 'card' | 'modal';
   fresh?: boolean;
+  preferredKind?: TelegramKind;
   onClose?: () => void;
   onConnected?: (connectionId?: string) => void | Promise<void>;
   onChanged?: () => void | Promise<void>;
 }) => {
   const [status, setStatus] = useState<TelegramStatus>(emptyStatus);
   const [token, setToken] = useState('');
+  const [createKind, setCreateKind] = useState<TelegramKind>(
+    preferredKind ?? 'bot',
+  );
+  const [adding, setAdding] = useState(fresh);
   const [busy, setBusy] = useState(false);
   const [busyId, setBusyId] = useState<string | null>(null);
   const toast = useToast();
@@ -214,6 +293,12 @@ export const TelegramConnectGuide = ({
   onConnectedRef.current = onConnected;
   onChangedRef.current = onChanged;
   statusRef.current = status;
+
+  useEffect(() => {
+    if (preferredKind) {
+      setCreateKind(preferredKind);
+    }
+  }, [preferredKind]);
 
   const notify = async (next: TelegramStatus) => {
     for (const bot of next.bots) {
@@ -309,7 +394,11 @@ export const TelegramConnectGuide = ({
 
       if (current.state === 'connected') {
         toast(
-          handle ? `Telegram подключён · ${handle}` : 'Telegram подключён',
+          handle
+            ? `Telegram подключён · ${handle}`
+            : current.kind === 'bot'
+              ? 'Обычный бот готов'
+              : 'Telegram подключён',
           'ok',
         );
         return;
@@ -325,13 +414,58 @@ export const TelegramConnectGuide = ({
 
       toast(
         handle
-          ? `Пока не видно подключения. Добавьте ${handle} в Telegram для бизнеса и сохраните права.`
-          : 'Пока не видно подключения. Сохраните права в Telegram для бизнеса и нажмите ещё раз.',
+          ? `Пока не видно аккаунта. Добавьте ${handle} в Telegram для бизнеса и сохраните права.`
+          : 'Пока не видно аккаунта. Сохраните права в Telegram для бизнеса и нажмите ещё раз.',
         'error',
       );
     } catch (err) {
       toast(
         err instanceof Error ? err.message : 'Не удалось проверить Telegram',
+        'error',
+      );
+    } finally {
+      setBusyId(null);
+    }
+  };
+
+  const changeKind = async (bot: TelegramBotHealth, kind: TelegramKind) => {
+    setBusyId(bot.connectionId);
+
+    try {
+      const next = await setTelegramKind(bot.connectionId, kind);
+
+      setStatus(next);
+      await notify(next);
+      await onChangedRef.current?.();
+
+      const current = next.bots.find((item) => item.connectionId === bot.connectionId);
+      const handle = botHandle(current?.username ?? bot.username);
+
+      if (kind === 'bot') {
+        toast(
+          handle ? `${handle} работает как обычный бот` : 'Обычный бот готов',
+          'ok',
+        );
+        return;
+      }
+
+      if (current?.state === 'connected') {
+        toast(
+          handle ? `${handle} подключён к аккаунту` : 'Бот подключён к аккаунту',
+          'ok',
+        );
+        return;
+      }
+
+      toast(
+        handle
+          ? `Дальше добавьте ${handle} в Telegram для бизнеса`
+          : 'Дальше добавьте бота в Telegram для бизнеса',
+        'ok',
+      );
+    } catch (err) {
+      toast(
+        err instanceof Error ? err.message : 'Не удалось сменить тип бота',
         'error',
       );
     } finally {
@@ -350,10 +484,11 @@ export const TelegramConnectGuide = ({
     setBusy(true);
 
     try {
-      const next = await registerTelegram(nextToken);
+      const next = await registerTelegram(nextToken, createKind);
 
       setStatus(next);
       setToken('');
+      setAdding(false);
       await notify(next);
       await onChangedRef.current?.();
 
@@ -362,15 +497,18 @@ export const TelegramConnectGuide = ({
         next.bots[next.bots.length - 1];
       const name = botHandle(created?.username ?? next.botUsername);
 
-      if (name) {
-        await navigator.clipboard?.writeText(name).catch(() => undefined);
-        toast(`Токен сохранён. Имя бота ${name} скопировано.`, 'ok');
-      } else {
-        toast('Токен сохранён. Дальше добавьте бота в Telegram для бизнеса.', 'ok');
+      if (createKind === 'bot') {
+        toast(
+          name ? `${name} готов как обычный бот` : 'Обычный бот готов',
+          'ok',
+        );
+        return;
       }
 
-      if (next.connected) {
-        toast('Telegram подключён', 'ok');
+      if (name) {
+        toast(`Токен сохранён. Дальше добавьте ${name} в Telegram для бизнеса.`, 'ok');
+      } else {
+        toast('Токен сохранён. Дальше добавьте бота в Telegram для бизнеса.', 'ok');
       }
     } catch (err) {
       toast(
@@ -396,6 +534,9 @@ export const TelegramConnectGuide = ({
     }
   };
 
+  const hasBots = status.bots.length > 0;
+  const showCreate = !hasBots || adding;
+
   const body = (
     <>
       <div className="telegram-guide-head">
@@ -406,79 +547,135 @@ export const TelegramConnectGuide = ({
           </button>
         ) : null}
       </div>
-      {status.bots.length ? null : <GuideSteps items={CREATE_STEPS} />}
-      {status.bots.length ? (
-        <ul className="telegram-bot-list">
-          {status.bots.map((bot) => {
-            const badge = botBadge(bot);
-            const handle = botHandle(bot.username);
+      {hasBots ? (
+        <section className="telegram-guide-section" aria-label="Уже подключённые боты">
+          <div className="telegram-guide-section-head">
+            <strong>Уже подключено</strong>
+            <span className="muted">Выберите бота или смените его тип</span>
+          </div>
+          <ul className="telegram-bot-list">
+            {status.bots.map((bot) => {
+              const badge = botBadge(bot);
+              const handle = botHandle(bot.username);
 
-            return (
-              <li key={bot.connectionId} className={`telegram-bot is-${bot.state}`}>
-                <div className="telegram-bot-head">
-                  <div>
-                    <strong>{handle || bot.name}</strong>
-                    <p className={`telegram-bot-state is-${bot.state}`}>
-                      {botStateText(bot)}
-                    </p>
+              return (
+                <li key={bot.connectionId} className={`telegram-bot is-${bot.state}`}>
+                  <div className="telegram-bot-head">
+                    <div>
+                      <strong>
+                        {handle || bot.name}
+                        <span className="telegram-bot-kind">{botKindLabel(bot.kind)}</span>
+                      </strong>
+                      <p className={`telegram-bot-state is-${bot.state}`}>
+                        {botStateText(bot)}
+                      </p>
+                    </div>
+                    <StatusBadge status={badge.status} label={badge.label} />
                   </div>
-                  <StatusBadge status={badge.status} label={badge.label} />
-                </div>
-                <GuideSteps items={botProgress(bot)} />
-                <div className="telegram-guide-actions">
-                  {fresh && bot.state === 'connected' ? (
+                  <GuideSteps items={botProgress(bot)} />
+                  <div className="telegram-guide-actions">
+                    {fresh && bot.state === 'connected' ? (
+                      <Button
+                        type="button"
+                        onClick={() => void onConnected?.(bot.connectionId)}
+                      >
+                        Использовать
+                      </Button>
+                    ) : null}
+                    {bot.kind === 'business' && bot.state !== 'invalid' ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        loading={busyId === bot.connectionId}
+                        onClick={() => void changeKind(bot, 'bot')}
+                      >
+                        Сделать обычным ботом
+                      </Button>
+                    ) : null}
+                    {bot.kind === 'bot' && bot.state !== 'invalid' ? (
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        loading={busyId === bot.connectionId}
+                        onClick={() => void changeKind(bot, 'business')}
+                      >
+                        Подключить к аккаунту
+                      </Button>
+                    ) : null}
                     <Button
                       type="button"
-                      onClick={() => void onConnected?.(bot.connectionId)}
+                      variant="ghost"
+                      loading={busyId === bot.connectionId}
+                      onClick={() => void checkBot(bot)}
                     >
-                      Использовать
+                      Обновить статус
                     </Button>
-                  ) : null}
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    loading={busyId === bot.connectionId}
-                    onClick={() => void checkBot(bot)}
-                  >
-                    Обновить статус
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    loading={busyId === bot.connectionId}
-                    onClick={() => void removeBot(bot)}
-                  >
-                    Удалить
-                  </Button>
-                </div>
-              </li>
-            );
-          })}
-        </ul>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      loading={busyId === bot.connectionId}
+                      onClick={() => void removeBot(bot)}
+                    >
+                      Удалить
+                    </Button>
+                  </div>
+                </li>
+              );
+            })}
+          </ul>
+        </section>
       ) : null}
-      <form
-        className="chat-connect-form"
-        onSubmit={(event) => {
-          event.preventDefault();
-          void saveToken();
-        }}
-      >
-        <label>
-          Токен бота
-          <input
-            type="password"
-            autoComplete="off"
-            placeholder="123456:ABC..."
-            value={token}
-            onChange={(event) => setToken(event.target.value)}
-          />
-        </label>
-        <div className="telegram-guide-actions">
-          <Button type="submit" loading={busy} disabled={!token.trim()}>
-            {status.bots.length ? 'Добавить бота' : 'Сохранить и продолжить'}
-          </Button>
-        </div>
-      </form>
+      {showCreate ? (
+        <section className="telegram-guide-create" aria-label="Новый бот">
+          {hasBots ? (
+            <div className="telegram-guide-section-head">
+              <strong>Новый бот</strong>
+              <span className="muted">Отдельный токен, не связан с ботами выше</span>
+            </div>
+          ) : null}
+          <form
+            className="chat-connect-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              void saveToken();
+            }}
+          >
+            <KindPicker value={createKind} onChange={setCreateKind} />
+            <GuideSteps items={createSteps(createKind)} />
+            <label>
+              Токен бота
+              <input
+                type="password"
+                autoComplete="off"
+                placeholder="123456:ABC..."
+                value={token}
+                onChange={(event) => setToken(event.target.value)}
+              />
+            </label>
+            <div className="telegram-guide-actions">
+              <Button type="submit" loading={busy} disabled={!token.trim()}>
+                {hasBots ? 'Добавить бота' : 'Сохранить и продолжить'}
+              </Button>
+              {hasBots ? (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setAdding(false);
+                    setToken('');
+                  }}
+                >
+                  Отмена
+                </Button>
+              ) : null}
+            </div>
+          </form>
+        </section>
+      ) : (
+        <Button type="button" variant="ghost" onClick={() => setAdding(true)}>
+          Добавить другого бота
+        </Button>
+      )}
     </>
   );
 

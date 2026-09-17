@@ -1,16 +1,23 @@
+import type { AgentProviderInfo } from '~/entities/agent';
 import { Icon } from '~/shared/ui/Icon';
 
 export const PromptForm = ({
   prompt,
   loading,
+  providers = [],
+  providerId,
   placeholder,
   onPromptChange,
+  onProviderChange,
   onSubmit,
 }: {
   prompt: string;
   loading: boolean;
+  providers?: AgentProviderInfo[];
+  providerId: string;
   placeholder?: string;
   onPromptChange: (value: string) => void;
+  onProviderChange: (id: string) => void;
   onSubmit: () => void;
 }) => (
   <div className="prompt-shell">
@@ -29,10 +36,26 @@ export const PromptForm = ({
         }}
         placeholder={
           placeholder ||
-          'Найдите заявки в почте, извлеките данные, создайте запись в 1С и напишите клиенту в Telegram'
+          'Спросите что угодно или опишите задачу: бот, почта, Excel, Telegram'
         }
       />
       <div className="prompt-toolbar">
+        <select
+          className="agent-select"
+          value={providerId}
+          onChange={(event) => onProviderChange(event.target.value)}
+          aria-label="Модель"
+        >
+          {providers.map((item) => (
+            <option
+              key={item.id}
+              value={item.id}
+              disabled={!item.available}
+            >
+              {item.name}
+            </option>
+          ))}
+        </select>
         <div className="row-actions">
           <button
             type="button"

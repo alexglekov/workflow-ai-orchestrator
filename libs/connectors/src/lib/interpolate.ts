@@ -1,3 +1,7 @@
+import { humanText } from './human-text';
+
+export { humanText, isJsonDump } from './human-text';
+
 export type TemplateContext = {
   __kind: 'tpl';
   input: Record<string, unknown>;
@@ -70,83 +74,6 @@ export const stringifyResult = (value: unknown): string => {
   } catch {
     return String(value);
   }
-};
-
-export const humanText = (value: unknown, depth = 0): string => {
-  if (value == null) {
-    return '';
-  }
-
-  if (typeof value === 'string') {
-    return value.trim();
-  }
-
-  if (typeof value === 'number' || typeof value === 'boolean') {
-    return String(value);
-  }
-
-  if (depth > 4) {
-    return '';
-  }
-
-  if (Array.isArray(value)) {
-    return value
-      .map((item) => humanText(item, depth + 1))
-      .filter(Boolean)
-      .join('\n');
-  }
-
-  const record = asRecord(value);
-
-  if (record['skipped'] === true) {
-    return '';
-  }
-
-  const items = record['items'] ?? record['messages'];
-  const listed = Array.isArray(items);
-
-  if (listed) {
-    const lines = items
-      .map((item) => humanText(item, depth + 1))
-      .filter(Boolean);
-
-    if (lines.length) {
-      return lines.join('\n');
-    }
-
-    return '';
-  }
-
-  const text = firstNonEmpty(
-    record['text'],
-    record['answer'],
-    record['subject'],
-    record['body'],
-    record['caption'],
-  );
-  const who = firstNonEmpty(record['username'], record['from'], record['name']);
-
-  if (text && who && who !== text) {
-    return `${who}: ${text}`;
-  }
-
-  if (text) {
-    return text;
-  }
-
-  if (record['isVoice'] === true || record['is_voice'] === true) {
-    return who ? `${who}: голосовое сообщение` : 'Голосовое сообщение';
-  }
-
-  if (record['sent'] === true) {
-    return firstNonEmpty(record['text']) || '';
-  }
-
-  if (record['source'] === 'event' || record['count'] === 0) {
-    return '';
-  }
-
-  return stringifyResult(value);
 };
 
 const resolveRoot = (ctx: TemplateContext, name: string): unknown => {

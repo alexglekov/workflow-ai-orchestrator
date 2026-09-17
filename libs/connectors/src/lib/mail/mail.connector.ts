@@ -6,7 +6,7 @@ import {
   ConnectorExecuteInput,
   ConnectorExecuteResult,
 } from '../types';
-import { interpolate, mergeContext } from '../interpolate';
+import { interpolate, mergeContext, humanText } from '../interpolate';
 
 const imapOptions = (credentials: Record<string, string>) => {
   const port = Number(credentials['port'] || 993);
@@ -151,7 +151,7 @@ const sendMail = async (
   const to = String(ctx['to'] || '');
   const subject = String(ctx['subject'] || 'Уведомление');
   const text = String(
-    ctx['text'] || ctx['body'] || JSON.stringify(previous ?? {}, null, 2),
+    ctx['text'] || ctx['body'] || humanText(previous) || 'Готово',
   );
 
   if (!to) {

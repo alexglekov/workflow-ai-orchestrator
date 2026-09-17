@@ -3,8 +3,10 @@ import { Inject, Injectable, Logger, UnauthorizedException, forwardRef } from '@
 import {
   flattenTelegramInput,
   parseBusinessConnection,
+  resolveTelegramKind,
   telegramCall,
   TELEGRAM_ALLOWED_UPDATES,
+  type TelegramKind,
 } from '@ai-worker/connectors';
 import { ConnectionsService } from '../connections/connections.service';
 import { RunsService } from '../runs/runs.service';
@@ -15,6 +17,7 @@ export type TelegramBotHealth = {
   connectionId: string;
   name: string;
   username: string;
+  kind: TelegramKind;
   state: 'connected' | 'waiting' | 'invalid';
   canReply: boolean;
   lastError: string | null;
@@ -148,15 +151,24 @@ export class TelegramGatewayService {
       }
     }
 
+    const kind = resolveTelegramKind(bot.credentials);
+
+    if (bot.credentials['telegramKind'] !== kind) {
+      await this.connections.patchCredentials(bot.connection.id, {
+        telegramKind: kind,
+      });
+    }
+
     const businessConnected = Boolean(bot.credentials['businessConnectionId']);
     const businessDisabled =
+      kind === 'business' &&
       bot.connection.lastError === 'Telegram для бизнеса отключён';
     const canReply = bot.credentials['canReply'] === 'true';
     const handle = username ? `@${username}` : '';
     const name = handle ? `Telegram ${handle}` : bot.connection.name;
     const state: TelegramBotHealth['state'] = !tokenValid
       ? 'invalid'
-      : businessConnected && !businessDisabled
+      : kind === 'bot' || (businessConnected && !businessDisabled)
         ? 'connected'
         : 'waiting';
     const lastError =
@@ -184,6 +196,7 @@ export class TelegramGatewayService {
       connectionId: bot.connection.id,
       name,
       username,
+      kind,
       state,
       canReply,
       lastError: state === 'connected' ? null : lastError,
@@ -224,8 +237,23 @@ export class TelegramGatewayService {
     };
   };
 
-  register = async (botToken: string): Promise<TelegramStatus> => {
-    await this.connections.registerTelegramBot(botToken);
+  register = async (
+    botToken: string,
+    kind?: TelegramKind,
+  ): Promise<TelegramStatus> => {
+    await this.connections.registerTelegramBot(botToken, kind);
+    await this.promoteTelegramTriggers();
+    await this.ensureWebhooks();
+    await this.sync();
+
+    return this.status();
+  };
+
+  setKind = async (
+    connectionId: string,
+    kind: TelegramKind,
+  ): Promise<TelegramStatus> => {
+    await this.connections.setTelegramKind(connectionId, kind);
     await this.promoteTelegramTriggers();
     await this.ensureWebhooks();
     await this.sync();

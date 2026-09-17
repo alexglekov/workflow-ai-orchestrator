@@ -8,7 +8,7 @@ import {
   Post,
   Req,
 } from '@nestjs/common';
-import { IsNotEmpty, IsString } from 'class-validator';
+import { IsIn, IsNotEmpty, IsOptional, IsString } from 'class-validator';
 import type { Request } from 'express';
 import { TelegramGatewayService } from './telegram.service';
 
@@ -16,6 +16,19 @@ class RegisterTelegramDto {
   @IsString()
   @IsNotEmpty()
   botToken!: string;
+
+  @IsOptional()
+  @IsIn(['bot', 'business'])
+  kind?: 'bot' | 'business';
+}
+
+class SetTelegramKindDto {
+  @IsString()
+  @IsNotEmpty()
+  connectionId!: string;
+
+  @IsIn(['bot', 'business'])
+  kind!: 'bot' | 'business';
 }
 
 @Controller('telegram')
@@ -29,7 +42,12 @@ export class TelegramController {
 
   @Post('register')
   register(@Body() dto: RegisterTelegramDto) {
-    return this.telegram.register(dto.botToken);
+    return this.telegram.register(dto.botToken, dto.kind);
+  }
+
+  @Post('kind')
+  setKind(@Body() dto: SetTelegramKindDto) {
+    return this.telegram.setKind(dto.connectionId, dto.kind);
   }
 
   @Post('prepare')

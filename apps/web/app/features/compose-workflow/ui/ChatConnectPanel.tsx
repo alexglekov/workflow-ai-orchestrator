@@ -12,10 +12,12 @@ import { useToast } from '~/shared/model/ui';
 export const ChatConnectPanel = ({
   connector,
   connections,
+  preferredTelegramKind,
   onConnected,
 }: {
   connector: ConnectorCatalog;
   connections: Connection[];
+  preferredTelegramKind?: 'bot' | 'business';
   onConnected: (connectionId: string) => void | Promise<void>;
 }) => {
   const existing = connections.filter(
@@ -100,6 +102,7 @@ export const ChatConnectPanel = ({
     return (
       <TelegramConnectGuide
         fresh
+        preferredKind={preferredTelegramKind}
         onConnected={async (connectionId) => {
           if (connectionId) {
             await onConnected(connectionId);

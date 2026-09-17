@@ -43,6 +43,21 @@ export const fetchWorkflowChatPage = (
   return http<ChatPage>(`/workflows/${workflowId}/chat?${query.toString()}`);
 };
 
+export const chatAgent = (payload: {
+  message: string;
+  prompt?: string;
+  providerId?: string;
+  workflowId?: string;
+  history?: AgentMessage[];
+}) =>
+  http<AgentPlanReply>('/agents/chat', {
+    method: 'POST',
+    body: JSON.stringify({
+      ...payload,
+      history: toAgentHistory(payload.history),
+    }),
+  });
+
 export const askAgent = (payload: {
   message: string;
   providerId?: string;

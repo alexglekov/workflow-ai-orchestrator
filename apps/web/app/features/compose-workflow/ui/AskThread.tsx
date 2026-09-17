@@ -9,6 +9,7 @@ import {
   parseChatActions,
   unresolvedConnectorIds,
 } from '~/shared/lib/chat-actions';
+import { humanizeOutput } from '~/shared/lib/humanize';
 import { ChatConnectPanel } from './ChatConnectPanel';
 import { ChatRunCard } from './ChatRunCard';
 
@@ -29,6 +30,7 @@ export const AskThread = ({
   onBound,
   onCancelRun,
   onRetryRun,
+  preferredTelegramKind,
 }: {
   messages: AgentMessage[];
   loading: boolean;
@@ -46,6 +48,7 @@ export const AskThread = ({
   onBound?: (connectorId: string, connectionId: string) => void | Promise<void>;
   onCancelRun?: (runId: string) => void;
   onRetryRun?: (runId: string) => void;
+  preferredTelegramKind?: 'bot' | 'business';
 }) => {
   const scroller = useRef<HTMLDivElement>(null);
   const sentinel = useRef<HTMLDivElement>(null);
@@ -204,6 +207,10 @@ export const AskThread = ({
                   /^остановлено\.?$/i.test(parsed.text)
                 ? ''
                 : parsed.text;
+        const shown =
+          item.role === 'assistant' && displayText
+            ? humanizeOutput(displayText) || displayText
+            : displayText;
 
         return (
           <div
@@ -217,7 +224,7 @@ export const AskThread = ({
               .filter(Boolean)
               .join(' ')}
           >
-            {displayText}
+            {shown}
             {item.role === 'assistant' && parsed.status === 'connected' ? (
               <span className="chat-live-chip is-ok">Подключено</span>
             ) : null}
@@ -287,6 +294,7 @@ export const AskThread = ({
                         <ChatConnectPanel
                           connector={connector}
                           connections={connections}
+                          preferredTelegramKind={preferredTelegramKind}
                           onConnected={async (connectionId) => {
                             await onBound?.(connectorId, connectionId);
                             setOpenConnect(null);

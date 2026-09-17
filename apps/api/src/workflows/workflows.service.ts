@@ -138,8 +138,8 @@ export class WorkflowsService {
     });
   };
 
-  syncSchedule = (id: string, text: string) =>
-    this.eventTriggers.syncScheduleFromPrompt(id, text);
+  syncSchedule = (id: string, text: string, hint?: unknown) =>
+    this.eventTriggers.syncScheduleFromPrompt(id, text, { hint });
 
   stopLive = async (id: string) => {
     await this.get(id);

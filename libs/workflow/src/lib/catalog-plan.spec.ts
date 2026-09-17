@@ -27,6 +27,7 @@ const catalog: PlanCatalogConnector[] = [
     actions: [
       { id: 'classify', name: 'Классифицировать' },
       { id: 'extract', name: 'Извлечь' },
+      { id: 'generate', name: 'Написать' },
     ],
   },
   {
@@ -68,6 +69,28 @@ describe('planFromCatalog', () => {
     assert.ok(!steps.includes('web.fetch'));
   });
 
+  it('fetches Binance ticker instead of BestChange rates', () => {
+    const steps = planFromCatalog(
+      'Собери все данные о курсе валютной паре BTC/USDT с binance и отправь мне в тг каждый час',
+      catalog,
+    );
+    const fetch = steps.find(
+      (step) => step.connectorId === 'web' && step.action === 'fetch',
+    );
+
+    assert.ok(fetch);
+    assert.equal(
+      fetch?.params['url'],
+      'https://api.binance.com/api/v3/ticker/24hr?symbol=BTCUSDT',
+    );
+    assert.ok(!steps.some((step) => step.action === 'rates'));
+    assert.ok(
+      steps.some(
+        (step) =>
+          step.connectorId === 'telegram' && step.action === 'send_message',
+      ),
+    );
+  });
 });
 
 describe('searchPhrase', () => {

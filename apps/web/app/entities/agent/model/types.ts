@@ -47,5 +47,7 @@ export interface AgentPlanReply {
   questions: string[];
   connectors: string[];
   name?: string;
+  telegramKind?: 'bot' | 'business';
+  intent?: 'ask' | 'plan';
   workflow?: Workflow;
 }

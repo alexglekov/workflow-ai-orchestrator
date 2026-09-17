@@ -24,6 +24,22 @@ export const resolveBotToken = (
   credentials: Record<string, string> = {},
 ): string => (credentials['botToken'] || '').trim();
 
+export type TelegramKind = 'bot' | 'business';
+
+export const resolveTelegramKind = (
+  credentials: Record<string, string> = {},
+): TelegramKind => {
+  if (credentials['telegramKind'] === 'business') {
+    return 'business';
+  }
+
+  if (credentials['telegramKind'] === 'bot') {
+    return 'bot';
+  }
+
+  return credentials['businessConnectionId'] ? 'business' : 'bot';
+};
+
 export const stripTelegramConnectMark = (text: string): string =>
   text
     .split('[[connect_telegram]]')

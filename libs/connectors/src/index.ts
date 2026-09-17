@@ -22,9 +22,15 @@ export type {
 } from './lib/telegram/normalize';
 export {
   resolveBotToken,
+  resolveTelegramKind,
   stripTelegramConnectMark,
   TELEGRAM_ALLOWED_UPDATES,
 } from './lib/telegram/platform';
+export type { TelegramKind } from './lib/telegram/platform';
+export {
+  parseTelegramKindIntent,
+  telegramKindLabel,
+} from './lib/telegram/kind-intent';
 export {
   connectMark,
   connectedStatusMark,

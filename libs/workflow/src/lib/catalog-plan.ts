@@ -54,7 +54,7 @@ const ACTION_HINTS: Record<string, string> = {
   'browser.open':
     'браузер playwright javascript spa p2p клик логин chromium',
   'web.rates':
-    'курс bestchange btc ltc usdt p2p биржа обменник',
+    'курс bestchange обменник монитор p2p',
   'excel.find_file': 'найди файл диск drive яндекс google xlsx',
   'excel.read_rows': 'прочитай прочитать строки лист таблицу excel счета',
   'excel.append_row': 'добавь допиши запиши строку в таблицу excel',
@@ -83,7 +83,7 @@ const ACTION_HINTS: Record<string, string> = {
   'telegram.get_updates':
     'входящие сообщения бот клиент написал диалог getupdates webhook',
   'telegram.send_voice': 'голосовое войес voice озвучь повтор',
-  'telegram.send_message': 'телеграм telegram уведомление сообщение бот отчёт',
+  'telegram.send_message': 'телеграм telegram тг уведомление сообщение бот отчёт',
 };
 
 const CONNECTOR_HINTS: Record<string, string> = {
@@ -95,7 +95,7 @@ const CONNECTOR_HINTS: Record<string, string> = {
   transform: 'фильтр шаблон отчёт преобразовать transform',
   memory: 'память memory ключ повтор',
   onec: '1с 1c onec crm контрагент инн лид задача счета',
-  telegram: 'телеграм telegram бот входящие диалог голос voice',
+  telegram: 'телеграм telegram тг бот входящие диалог голос voice',
 };
 
 const LIST_PRODUCERS = new Set([
@@ -175,6 +175,63 @@ const scoreAction = (
 
 const firstUrl = (prompt: string): string =>
   (prompt.match(/https?:\/\/[^\s)\]>'"]+/i)?.[0] || '').replace(/[.,;]+$/u, '');
+
+const NAMED_SITES: Array<[RegExp, string]> = [
+  [/\bbinance\b/i, 'binance.com'],
+  [/\bbybit\b/i, 'bybit.com'],
+  [/\bokx\b/i, 'okx.com'],
+  [/\bcoinbase\b/i, 'coinbase.com'],
+  [/\bkraken\b/i, 'kraken.com'],
+  [/\bkucoin\b/i, 'kucoin.com'],
+];
+
+const NAMED_EXCHANGE = /\b(binance|bybit|okx|coinbase|kraken|kucoin|huobi|mexc)\b/i;
+
+const searchSiteFromPrompt = (prompt: string): string => {
+  for (const [pattern, site] of NAMED_SITES) {
+    if (pattern.test(prompt)) {
+      return site;
+    }
+  }
+
+  const host = prompt.match(
+    /\b(?:www\.)?([a-z0-9-]+\.(?:com|ru|io|net|org|co))\b/i,
+  )?.[1];
+
+  if (host && !/bestchange/i.test(host)) {
+    return host.replace(/^www\./i, '');
+  }
+
+  return '';
+};
+
+const spotSymbol = (prompt: string): string => {
+  const match = prompt.match(
+    /\b(btc|eth|ltc|sol|xrp|bnb|usdt|usdc)\s*[/_-]\s*(btc|eth|ltc|sol|xrp|bnb|usdt|usdc)\b/i,
+  );
+
+  return match ? `${match[1]}${match[2]}`.toUpperCase() : '';
+};
+
+const publicTickerUrl = (prompt: string): string => {
+  const symbol = spotSymbol(prompt);
+
+  if (!symbol) {
+    return '';
+  }
+
+  if (/\bbinance\b/i.test(prompt)) {
+    return `https://api.binance.com/api/v3/ticker/24hr?symbol=${symbol}`;
+  }
+
+  return '';
+};
+
+const wantsBestChangeRates = (prompt: string): boolean =>
+  /bestchange/i.test(prompt) ||
+  (/курс/i.test(prompt) &&
+    /btc|ltc|usdt/i.test(prompt) &&
+    !NAMED_EXCHANGE.test(prompt));
 
 const isExcelUrl = (url: string): boolean =>
   /xlsx|docs\.google|drive\.google|disk\.yandex|yadi\.sk/i.test(url);
@@ -268,10 +325,22 @@ const fillParams = (
   }
 
   if (connectorId === 'web' && actionId === 'search') {
-    return { query: searchPhrase(prompt), limit: 5 };
+    const site = searchSiteFromPrompt(prompt);
+
+    return {
+      query: searchPhrase(prompt),
+      limit: 5,
+      ...(site ? { site, freshness: 'day' } : {}),
+    };
   }
 
   if (connectorId === 'web' && actionId === 'fetch') {
+    const ticker = publicTickerUrl(prompt);
+
+    if (ticker) {
+      return { url: ticker };
+    }
+
     if (url && !isExcelUrl(url)) {
       return { url };
     }
@@ -316,7 +385,7 @@ const fillParams = (
   if (connectorId === 'llm' && actionId === 'generate') {
     return {
       instruction:
-        'Напиши готовый текст для пользователя (сообщение, отчёт). Не пиши код, скрипты и JSON — только сам текст.',
+        'Напиши готовый текст для человека (сообщение в Telegram или отчёт). Без кода, JSON и скриптов — только сам текст.',
       text: '{{previous}}',
     };
   }
@@ -550,10 +619,8 @@ export const planFromCatalog = (
     unique.push(...filtered);
   }
 
-  const webUrl = firstUrl(text);
-  const wantsRates =
-    /bestchange/i.test(text) ||
-    (/курс/i.test(text) && /btc|ltc|usdt/i.test(text));
+  const webUrl = firstUrl(text) || publicTickerUrl(text);
+  const wantsRates = wantsBestChangeRates(text);
   const wantsExtract = /извлеч|инн|структур/i.test(text);
 
   if (wantsRates) {
@@ -563,6 +630,13 @@ export const planFromCatalog = (
           item.connector.id === 'web' &&
           (item.action.id === 'search' || item.action.id === 'fetch')
         ),
+    );
+    unique.length = 0;
+    unique.push(...filtered);
+  } else {
+    const filtered = unique.filter(
+      (item) =>
+        !(item.connector.id === 'web' && item.action.id === 'rates'),
     );
     unique.length = 0;
     unique.push(...filtered);
@@ -605,6 +679,18 @@ export const planFromCatalog = (
 
   if (wantsRates) {
     withFetch = ensureAction(withFetch, 'web', 'rates');
+  } else if (searchSiteFromPrompt(text) && !publicTickerUrl(text)) {
+    withFetch = ensureAction(withFetch, 'web', 'search');
+  }
+
+  if (
+    publicTickerUrl(text) &&
+    withFetch.some(
+      (item) =>
+        item.connector.id === 'telegram' && item.action.id === 'send_message',
+    )
+  ) {
+    withFetch = ensureAction(withFetch, 'llm', 'generate');
   }
 
   if (

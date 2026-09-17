@@ -170,7 +170,7 @@ runtime?: { workflowId, getState, setState }
 
 ### `@ai-worker/agents`
 
-Провайдер: Qwen. Если нет `QWEN_API_KEY`, `resolve` бросает ошибку, а не подставляет заглушку.
+Провайдеры чата: Qwen и OpenAI. **Auto** (`orchestrator`) классифицирует сообщение (`ask` — ответ, `plan` — собрать/править шаги) и выбирает модель. Если нет ключей, `resolve` бросает ошибку, а не подставляет заглушку.
 
 - `ask` — ответ с контекстом каталога / подключений / текущего workflow
 - `plan` — `questions` или `workflow`; `sanitizePlan` оставляет только действия из каталога
@@ -235,7 +235,7 @@ interface WorkflowRepository {
 |---|---|---|
 | `runWorkflow` | `getConnector`, `getCredentials`, `onStepUpdate`, `shouldCancel` | несколько адаптеров, I/O, ядро не должно знать Nest/Prisma |
 | `Connector` | `execute` / `testConnection` | плагины: mail vs telegram vs browser |
-| `AgentProvider` | `ask` / `plan` | Qwen |
+| `AgentProvider` | `ask` / `plan` | Qwen, OpenAI, Auto (оркестратор) |
 
 | Место | Почему нет порта в «ядре» |
 |---|---|

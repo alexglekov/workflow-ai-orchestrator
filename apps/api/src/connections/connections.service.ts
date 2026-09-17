@@ -6,8 +6,10 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import {
+  resolveTelegramKind,
   telegramCall,
   type TelegramBusinessConnection,
+  type TelegramKind,
 } from '@ai-worker/connectors';
 import { encryptJson } from '@ai-worker/data-access';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
@@ -207,7 +209,7 @@ export class ConnectionsService {
     }));
   };
 
-  registerTelegramBot = async (botToken: string) => {
+  registerTelegramBot = async (botToken: string, kind?: TelegramKind) => {
     const token = botToken.trim();
 
     if (!token) {
@@ -231,19 +233,23 @@ export class ConnectionsService {
       creds: decryptCredentials(row, key),
     }));
     const matched = decrypted.find((item) => item.creds['botToken'] === token);
+    const telegramKind: TelegramKind =
+      kind ?? (matched ? resolveTelegramKind(matched.creds) : 'bot');
     const name = username
       ? `Telegram @${username}`
       : me.result?.first_name
         ? `Telegram ${me.result.first_name}`
-        : 'Telegram бот';
+        : telegramKind === 'business'
+          ? 'Telegram для бизнеса'
+          : 'Telegram бот';
     const credentials: Record<string, string> = {
       ...(matched?.creds ?? {}),
       botToken: token,
       botUsername: username,
+      telegramKind,
     };
     const connected =
-      matched?.row.status === 'connected' &&
-      Boolean(matched.creds['businessConnectionId']);
+      telegramKind === 'bot' || Boolean(credentials['businessConnectionId']);
 
     if (matched) {
       const row = await this.connections.update(matched.row.id, {
@@ -265,11 +271,56 @@ export class ConnectionsService {
       name,
       credentialsEnc: encryptJson(credentials, key),
     });
+    const row = await this.connections.update(created.id, {
+      status: connected ? 'connected' : 'disconnected',
+      lastError: null,
+    });
 
     return toPublicConnection(
-      created,
+      row,
       key,
-      secretKeys(this.connectors, created.connectorId),
+      secretKeys(this.connectors, row.connectorId),
+    );
+  };
+
+  setTelegramKind = async (id: string, kind: TelegramKind) => {
+    const existing = await this.connections.findById(id);
+
+    if (!existing) {
+      throw new NotFoundException('Подключение не найдено');
+    }
+
+    if (existing.connectorId !== 'telegram') {
+      throw new BadRequestException('Это не подключение Telegram');
+    }
+
+    const key = this.key();
+    const current = decryptCredentials(existing, key);
+
+    if (!current['botToken']) {
+      throw new BadRequestException('Нет токена бота');
+    }
+
+    const credentials = { ...current, telegramKind: kind };
+    const hasBusiness = Boolean(current['businessConnectionId']);
+    const businessDisabled =
+      existing.lastError === 'Telegram для бизнеса отключён';
+    const connected =
+      kind === 'bot' || (hasBusiness && !businessDisabled);
+    const row = await this.connections.update(id, {
+      credentialsEnc: encryptJson(credentials, key),
+      status: connected ? 'connected' : 'disconnected',
+      lastError: connected
+        ? null
+        : businessDisabled
+          ? existing.lastError
+          : null,
+    });
+
+    return toPublicConnection(
+      row,
+      key,
+      secretKeys(this.connectors, row.connectorId),
     );
   };
 
@@ -309,6 +360,8 @@ export class ConnectionsService {
       decrypted.find(
         (item) => origin?.botToken && item.creds['botToken'] === origin.botToken,
       );
+    const kind: TelegramKind =
+      matched?.creds['telegramKind'] === 'bot' ? 'bot' : 'business';
     const credentials: Record<string, string> = {
       ...(matched?.creds ?? {}),
       ...(origin?.botToken ? { botToken: origin.botToken } : {}),
@@ -319,16 +372,22 @@ export class ConnectionsService {
       firstName: parsed.firstName,
       canReply: parsed.canReply ? 'true' : 'false',
       chatId: matched?.creds['chatId'] || parsed.userChatId,
+      telegramKind: kind,
     };
-    const status = parsed.isEnabled ? 'connected' : 'disconnected';
-    const lastError = parsed.isEnabled
-      ? null
-      : 'Telegram для бизнеса отключён';
-    const name = parsed.username
-      ? `Telegram @${parsed.username}`
-      : parsed.firstName
-        ? `Telegram ${parsed.firstName}`
-        : 'Telegram для бизнеса';
+    const status =
+      kind === 'bot' || parsed.isEnabled ? 'connected' : 'disconnected';
+    const lastError =
+      kind === 'bot' || parsed.isEnabled
+        ? null
+        : 'Telegram для бизнеса отключён';
+    const name =
+      kind === 'bot' && matched
+        ? matched.row.name
+        : parsed.username
+          ? `Telegram @${parsed.username}`
+          : parsed.firstName
+            ? `Telegram ${parsed.firstName}`
+            : 'Telegram для бизнеса';
 
     if (matched) {
       const row = await this.connections.update(matched.row.id, {

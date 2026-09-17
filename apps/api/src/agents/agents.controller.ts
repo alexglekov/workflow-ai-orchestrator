@@ -1,5 +1,5 @@
 import { Body, Controller, Get, Post } from '@nestjs/common';
-import { AskAgentDto, PlanAgentDto } from './dto';
+import { AskAgentDto, ChatAgentDto, PlanAgentDto } from './dto';
 import { AgentsService } from './agents.service';
 
 @Controller('agents')
@@ -9,6 +9,11 @@ export class AgentsController {
   @Get()
   list() {
     return this.agents.list();
+  }
+
+  @Post('chat')
+  chat(@Body() dto: ChatAgentDto) {
+    return this.agents.chat(dto);
   }
 
   @Post('ask')

@@ -15,6 +15,7 @@ export {
   fetchWorkflowChat,
   fetchWorkflowChatPage,
   askAgent,
+  chatAgent,
   planAgent,
   toAgentHistory,
 } from './api/agents';

@@ -7,8 +7,9 @@ import {
   forwardRef,
 } from '@nestjs/common';
 import { flattenTelegramInput, eventTriggerTypesFromSteps } from '@ai-worker/connectors';
+import { inferScheduleIntent } from '@ai-worker/agents';
 import {
-  parseScheduleIntent,
+  clampScheduleIntent,
   type ScheduleIntent,
 } from '@ai-worker/workflow';
 import { RunsService } from '../runs/runs.service';
@@ -175,9 +176,10 @@ export class TriggersService {
   syncScheduleFromPrompt = async (
     workflowId: string,
     text: string,
-    options: { updateExisting?: boolean } = {},
+    options: { updateExisting?: boolean; hint?: unknown } = {},
   ): Promise<ScheduleIntent | null> => {
-    const intent = parseScheduleIntent(text);
+    const intent =
+      clampScheduleIntent(options.hint) ?? (await inferScheduleIntent(text));
 
     if (!intent) {
       return null;

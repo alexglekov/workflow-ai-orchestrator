@@ -12,6 +12,57 @@ const asCount = (value: string): number | null => {
   return Number.isFinite(count) && count >= 1 ? Math.round(count) : null;
 };
 
+const atFrom = (value: unknown): string | undefined => {
+  const raw = String(value ?? '').trim();
+  const match = raw.match(/^(\d{1,2})[:.](\d{2})$/);
+
+  if (!match) {
+    return undefined;
+  }
+
+  const hour = Number(match[1]);
+  const minute = Number(match[2]);
+
+  if (hour > 23 || minute > 59) {
+    return undefined;
+  }
+
+  return padTime(hour, minute);
+};
+
+/** Нормализует JSON расписания от LLM или regex. */
+export const clampScheduleIntent = (value: unknown): ScheduleIntent | null => {
+  if (value == null || typeof value !== 'object') {
+    return null;
+  }
+
+  const record = value as Record<string, unknown>;
+  const at = atFrom(record['at'] ?? record['time']);
+  const every = Number(
+    record['everyMinutes'] ?? record['minutes'] ?? record['interval'],
+  );
+
+  if (at) {
+    return { everyMinutes: 1440, at };
+  }
+
+  if (!Number.isFinite(every) || every < 1) {
+    return null;
+  }
+
+  return { everyMinutes: Math.min(10_080, Math.max(1, Math.round(every))) };
+};
+
+export const looksLikeSchedule = (text: string): boolean => {
+  const value = text.toLowerCase();
+
+  return (
+    /(?:кажд|кажл|кжд|every|еже|раз\s*в|по\s*расписан|daily|hourly|cron)/i.test(
+      value,
+    ) && /час|минут|утро|вечер|день|hour|min|day/i.test(value)
+  );
+};
+
 /** Достаёт интервал или ежедневное время из формулировки задачи. */
 export const parseScheduleIntent = (text: string): ScheduleIntent | null => {
   const value = text.toLowerCase().replace(/\s+/g, ' ').trim();
@@ -47,16 +98,18 @@ export const parseScheduleIntent = (text: string): ScheduleIntent | null => {
   if (everyN) {
     const count = asCount(everyN[1]);
 
-    if (!count) {
-      return null;
+    if (count) {
+      return {
+        everyMinutes: /час|hour/.test(everyN[2]) ? count * 60 : count,
+      };
     }
-
-    return {
-      everyMinutes: /час|hour/.test(everyN[2]) ? count * 60 : count,
-    };
   }
 
-  if (/каждый\s+час|ежечасно|every\s+hour/.test(value)) {
+  if (
+    /раз\s+в\s+час|ежечасно|every\s+hour|(?:кажд|кажл|кжд)\p{L}*\s+час/u.test(
+      value,
+    )
+  ) {
     return { everyMinutes: 60 };
   }
 

@@ -6,6 +6,8 @@ import {
 } from '@nestjs/common';
 import {
   createDefaultRegistry,
+  inferScheduleIntent,
+  routeChat,
   sanitizePlan,
   type AgentCapability,
   type AgentContext,
@@ -20,12 +22,15 @@ import {
   isLaunchIntent,
   STATUS_STOPPED_MARK,
   launchedStatusMessage,
+  parseTelegramKindIntent,
+  resolveTelegramKind,
+  telegramKindLabel,
 } from '@ai-worker/connectors';
-import { parseScheduleIntent, scheduleIntentLabel } from '@ai-worker/workflow';
+import { scheduleIntentLabel } from '@ai-worker/workflow';
 import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
 import { WorkflowsService } from '../workflows/workflows.service';
-import { AskAgentDto, PlanAgentDto } from './dto';
+import { AskAgentDto, ChatAgentDto, PlanAgentDto } from './dto';
 
 @Injectable()
 export class AgentsService {
@@ -38,56 +43,63 @@ export class AgentsService {
   ) {}
 
   list = () => ({
-    active: 'qwen',
+    active: 'orchestrator',
     providers: this.registry.info(),
   });
 
-  ask = async (dto: AskAgentDto) => {
+  chat = async (dto: ChatAgentDto) => {
     try {
-      const provider = this.resolve(dto.providerId);
+      const message = dto.message.trim();
+      const prompt = (dto.prompt || message).trim();
       const context = await this.context(dto.workflowId);
       const history = dto.workflowId
-        ? await this.workflows.listChatThread(dto.workflowId, 'ask')
+        ? await this.workflows.listChatThread(dto.workflowId, 'build')
         : dto.history;
-      const message = dto.message.trim();
+      const route = await routeChat({
+        message,
+        prompt,
+        history,
+        context,
+        requestedProvider: dto.providerId,
+        availableProviderIds: this.registry
+          .workers()
+          .filter((agent) => agent.available())
+          .map((agent) => agent.id),
+      });
+      const next = { ...dto, prompt, message, providerId: route.providerId };
 
-      try {
-        const reply = await provider.ask({
-          message,
-          history,
-          context,
-          providerId: dto.providerId,
-        });
-
-        if (dto.workflowId) {
-          await this.workflows.appendChat(dto.workflowId, 'ask', [
-            { role: 'user', content: message },
-            {
-              role: 'assistant',
-              content: await this.withReadyCta(reply.message, [], message),
-            },
-          ]);
-        }
+      if (route.intent === 'ask') {
+        const reply = await this.replyAsk(next, 'build');
 
         return {
-          ...reply,
-          message: await this.withReadyCta(reply.message, [], message),
+          kind: 'questions' as const,
+          providerId: reply.providerId,
+          message: reply.message,
+          questions: [],
+          connectors: [],
+          steps: [],
+          intent: route.intent,
         };
-      } catch (err) {
-        if (dto.workflowId) {
-          await this.workflows.appendChat(dto.workflowId, 'ask', [
-            { role: 'user', content: message },
-            {
-              role: 'assistant',
-              content:
-                err instanceof Error ? err.message : 'Не удалось спросить агента',
-              status: 'error',
-            },
-          ]);
-        }
-
-        throw err;
       }
+
+      return {
+        ...(await this.plan({
+          prompt,
+          message,
+          providerId: route.providerId,
+          workflowId: dto.workflowId,
+          history: dto.history,
+        })),
+        intent: route.intent,
+      };
+    } catch (err) {
+      throw toHttpError(err);
+    }
+  };
+
+  ask = async (dto: AskAgentDto) => {
+    try {
+      return await this.replyAsk(dto, 'ask');
     } catch (err) {
       throw toHttpError(err);
     }
@@ -162,10 +174,35 @@ export class AgentsService {
           }),
           context,
         );
+        const current = dto.workflowId
+          ? await this.workflows.get(dto.workflowId)
+          : null;
+        const telegramKind = resolvePlanTelegramKind({
+          message,
+          prompt,
+          history,
+          planned,
+          currentSteps: current?.steps ?? [],
+        });
+
+        if (telegramKind) {
+          const connectionId = current?.steps.find(
+            (step) => step.connectorId === 'telegram' && step.connectionId,
+          )?.connectionId;
+
+          if (connectionId) {
+            await this.connections.setTelegramKind(connectionId, telegramKind);
+          }
+        }
+
         const scheduleSource = [prompt, message].filter(Boolean).join('\n');
         const schedule = dto.workflowId
-          ? await this.workflows.syncSchedule(dto.workflowId, scheduleSource)
-          : parseScheduleIntent(scheduleSource);
+          ? await this.workflows.syncSchedule(
+              dto.workflowId,
+              scheduleSource,
+              planned.schedule,
+            )
+          : planned.schedule ?? (await inferScheduleIntent(scheduleSource));
         const scheduleNote =
           schedule &&
           !/расписан|каждую минут|каждые |каждый час|ежедневн/i.test(
@@ -173,11 +210,25 @@ export class AgentsService {
           )
             ? `\n\nПоставил запуск ${scheduleIntentLabel(schedule)}.`
             : '';
+        const kindNote =
+          telegramKind &&
+          !/тип telegram|обычн\w*\s+бот|бот для аккаунта/i.test(planned.message)
+            ? `\n\nТип Telegram: ${telegramKindLabel(telegramKind)}${
+                telegramKind === 'business'
+                  ? ' — диалоги клиентов и ответы от вашего имени.'
+                  : ' — отвечает в чате с ботом.'
+              }`
+            : '';
         const result = {
           ...planned,
+          telegramKind,
           message: await this.withReadyCta(
-            `${toAssistantMessage(planned)}${scheduleNote}`.trim(),
-            planned.kind === 'workflow' ? planned.steps : [],
+            `${toAssistantMessage(planned)}${scheduleNote}${kindNote}`.trim(),
+            current?.steps.length && planned.kind !== 'workflow'
+              ? current.steps
+              : planned.kind === 'workflow'
+                ? planned.steps
+                : [],
             prompt,
             message,
             ...(planned.connectors ?? []),
@@ -197,12 +248,11 @@ export class AgentsService {
         }
 
         if (dto.workflowId && result.kind === 'workflow') {
-          const current = await this.workflows.get(dto.workflowId);
           const shouldRename =
             Boolean(result.name) &&
-            (!current.name || current.name === 'Новый workflow');
+            (!current?.name || current.name === 'Новый workflow');
           const bound = new Map(
-            current.steps
+            (current?.steps ?? [])
               .filter((step) => step.connectionId)
               .map((step) => [step.connectorId, step.connectionId]),
           );
@@ -242,6 +292,62 @@ export class AgentsService {
     }
   };
 
+  private replyAsk = async (
+    dto: AskAgentDto | ChatAgentDto,
+    thread: 'ask' | 'build',
+  ) => {
+    const provider = this.resolve(dto.providerId);
+    const context = await this.context(dto.workflowId);
+    const history = dto.workflowId
+      ? await this.workflows.listChatThread(dto.workflowId, thread)
+      : dto.history;
+    const message = dto.message.trim();
+    const current = dto.workflowId
+      ? await this.workflows.get(dto.workflowId)
+      : null;
+    const ctaSteps = current?.steps ?? [];
+
+    try {
+      const reply = await provider.ask({
+        message,
+        history,
+        context,
+        providerId: dto.providerId,
+      });
+      const content = await this.withReadyCta(
+        reply.message,
+        ctaSteps,
+        message,
+      );
+
+      if (dto.workflowId) {
+        await this.workflows.appendChat(dto.workflowId, thread, [
+          { role: 'user', content: message },
+          { role: 'assistant', content },
+        ]);
+      }
+
+      return {
+        ...reply,
+        message: content,
+      };
+    } catch (err) {
+      if (dto.workflowId) {
+        await this.workflows.appendChat(dto.workflowId, thread, [
+          { role: 'user', content: message },
+          {
+            role: 'assistant',
+            content:
+              err instanceof Error ? err.message : 'Не удалось спросить агента',
+            status: 'error',
+          },
+        ]);
+      }
+
+      throw err;
+    }
+  };
+
   private resolve = (
     providerId?: string,
     capability: AgentCapability = 'ask',
@@ -264,6 +370,10 @@ export class AgentsService {
     const connections = (await this.connections.list()).map((item) => ({
       name: item.name,
       connectorId: item.connectorId,
+      status: item.status,
+      ...(item.connectorId === 'telegram'
+        ? { telegramKind: resolveTelegramKind(item.credentials) }
+        : {}),
     }));
 
     if (!workflowId) {
@@ -347,4 +457,63 @@ const toAssistantMessage = (plan: AgentPlanResult): string => {
   }
 
   return plan.message ? `${plan.message}\n\n${list}` : list;
+};
+
+const resolvePlanTelegramKind = ({
+  message,
+  prompt,
+  history,
+  planned,
+  currentSteps,
+}: {
+  message: string;
+  prompt: string;
+  history?: Array<{ role: string; content: string }>;
+  planned: AgentPlanResult;
+  currentSteps: Array<{ connectorId: string; connectionId?: string | null }>;
+}) => {
+  const hasTelegram =
+    currentSteps.some((step) => step.connectorId === 'telegram') ||
+    planned.steps.some((step) => step.connectorId === 'telegram') ||
+    planned.connectors.includes('telegram');
+
+  if (!hasTelegram) {
+    return undefined;
+  }
+
+  const bound = Boolean(
+    currentSteps.some((step) => step.connectorId === 'telegram' && step.connectionId),
+  );
+  const parsedNow = parseTelegramKindIntent(message);
+
+  if (parsedNow) {
+    return parsedNow;
+  }
+
+  if (bound) {
+    return undefined;
+  }
+
+  const earlier = [...(history ?? [])]
+    .reverse()
+    .filter((item) => item.role === 'user')
+    .map((item) => item.content);
+
+  for (const chunk of earlier) {
+    const parsed = parseTelegramKindIntent(chunk);
+
+    if (parsed) {
+      return parsed;
+    }
+  }
+
+  if (prompt !== message) {
+    const fromPrompt = parseTelegramKindIntent(prompt);
+
+    if (fromPrompt) {
+      return fromPrompt;
+    }
+  }
+
+  return planned.telegramKind ?? 'bot';
 };

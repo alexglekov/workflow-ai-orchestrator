@@ -3,10 +3,12 @@ import { Link, useParams, useSearchParams } from 'react-router';
 import { useAtom } from 'jotai';
 import {
   askAgent,
+  chatAgent,
+  fetchAgents,
   fetchWorkflowChat,
   fetchWorkflowChatPage,
-  planAgent,
   type AgentMessage,
+  type AgentProviderInfo,
   type ComposerMode,
 } from '~/entities/agent';
 import { connectionsAtom, fetchConnections } from '~/entities/connection';
@@ -42,6 +44,7 @@ import {
   TriggerPanel,
   TriggerPicker,
 } from '~/features/compose-workflow';
+import { ChatHistoryDrawer } from '~/features/browse-chats';
 import {
   connectIntentId,
   connectMark,
@@ -61,6 +64,48 @@ import { isEventTrigger } from '~/shared/lib/event-steps';
 import { errorAtom, loadingAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
 import { Icon } from '~/shared/ui/Icon';
+
+const AGENT_STORAGE_KEY = 'workflow-agent';
+
+const fallbackAgents = (): AgentProviderInfo[] => [
+  {
+    id: 'orchestrator',
+    name: 'Auto',
+    available: true,
+    capabilities: ['ask', 'plan'],
+  },
+  {
+    id: 'qwen',
+    name: 'Qwen',
+    available: true,
+    capabilities: ['ask', 'plan'],
+  },
+  {
+    id: 'openai',
+    name: 'OpenAI',
+    available: false,
+    capabilities: ['ask', 'plan'],
+  },
+];
+
+const sortAgents = (providers: AgentProviderInfo[]) => {
+  const order = ['orchestrator', 'qwen', 'openai'];
+
+  return [...providers].sort((left, right) => {
+    const a = order.indexOf(left.id);
+    const b = order.indexOf(right.id);
+
+    return (a < 0 ? 99 : a) - (b < 0 ? 99 : b);
+  });
+};
+
+const readStoredAgent = () => {
+  try {
+    return localStorage.getItem(AGENT_STORAGE_KEY) || 'orchestrator';
+  } catch {
+    return 'orchestrator';
+  }
+};
 
 export const WorkflowEditorPage = () => {
   const { id } = useParams();
@@ -89,12 +134,18 @@ export const WorkflowEditorPage = () => {
   const [buildHasMore, setBuildHasMore] = useState(false);
   const [buildLoadingMore, setBuildLoadingMore] = useState(false);
   const [planning, setPlanning] = useState(false);
+  const [preferredTelegramKind, setPreferredTelegramKind] = useState<
+    'bot' | 'business' | undefined
+  >();
   const [mobileTab, setMobileTab] = useState<'triggers' | 'chat' | 'flow'>(
     'chat',
   );
   const [runs, setRuns] = useState<Record<string, Run>>({});
   const [launching, setLaunching] = useState(false);
   const [stopping, setStopping] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  const [agents, setAgents] = useState<AgentProviderInfo[]>(fallbackAgents);
+  const [providerId, setProviderId] = useState('orchestrator');
   const persistTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const persistGen = useRef(0);
   const nameRef = useRef(name);
@@ -105,6 +156,26 @@ export const WorkflowEditorPage = () => {
   nameRef.current = name;
   promptRef.current = prompt;
   workflowRef.current = workflow;
+
+  useEffect(() => {
+    void fetchAgents()
+      .then((catalog) => {
+        const providers = sortAgents(
+          catalog.providers.length ? catalog.providers : fallbackAgents(),
+        );
+        const stored = readStoredAgent();
+        const next =
+          providers.find((item) => item.id === stored && item.available)?.id ||
+          providers.find((item) => item.available)?.id ||
+          'orchestrator';
+
+        setAgents(providers);
+        setProviderId(next);
+      })
+      .catch(() => {
+        setAgents(fallbackAgents());
+      });
+  }, []);
 
   useEffect(
     () => () => {
@@ -165,6 +236,10 @@ export const WorkflowEditorPage = () => {
       setMobileTab('chat');
     }
   }, [workflow, triggers.length, mobileTab]);
+
+  useEffect(() => {
+    setHistoryOpen(false);
+  }, [id]);
 
   useEffect(() => {
     const ids = [
@@ -506,11 +581,10 @@ export const WorkflowEditorPage = () => {
 
     const current = workflowRef.current ?? workflow;
     const missing = unresolvedConnectorIds(current.steps, connections);
-    const events = eventTriggersOf(triggers);
-    const eventLive =
+    const alreadyLive =
       current.steps.length > 0 &&
       missing.length === 0 &&
-      events.some((item) => item.enabled);
+      liveTriggersOf(triggers).length > 0;
     const active = Object.values(runs).filter(
       (item) => item.status === 'pending' || item.status === 'running',
     );
@@ -534,7 +608,7 @@ export const WorkflowEditorPage = () => {
       return;
     }
 
-    if (eventLive || active.length) {
+    if (alreadyLive || active.length) {
       await settleThread('build', LAUNCH_MARK, {
         content: launchedStatusMessage(active[0]?.id),
       });
@@ -551,13 +625,14 @@ export const WorkflowEditorPage = () => {
           !item.enabled &&
           (item.type === 'schedule' || isEventTrigger(item.type)),
       );
-      const eventBots = eventTriggersOf(synced);
+      const timedOrEvents = synced.filter(
+        (item) =>
+          item.type === 'schedule' || isEventTrigger(item.type),
+      );
 
-      if (eventBots.length || toStart.length) {
+      if (timedOrEvents.length) {
         await Promise.all(
-          (toStart.length ? toStart : eventBots.filter((item) => !item.enabled)).map(
-            (item) => updateTrigger(item.id, { enabled: true }),
-          ),
+          toStart.map((item) => updateTrigger(item.id, { enabled: true })),
         );
         setTriggers(await fetchTriggers(id).catch(() => synced));
         await settleThread('build', LAUNCH_MARK, {
@@ -758,10 +833,10 @@ export const WorkflowEditorPage = () => {
     clearTimeout(persistTimer.current);
 
     try {
-      const result = await planAgent({
+      const result = await chatAgent({
         prompt: task,
         message,
-        providerId: 'qwen',
+        providerId,
         workflowId: id,
         history,
       });
@@ -770,6 +845,19 @@ export const WorkflowEditorPage = () => {
         ...current,
         { role: 'assistant', content: result.message },
       ]);
+
+      if (
+        result.telegramKind === 'bot' ||
+        result.telegramKind === 'business'
+      ) {
+        setPreferredTelegramKind(result.telegramKind);
+      }
+
+      const nextConnections = await fetchConnections().catch(() => null);
+
+      if (nextConnections) {
+        setConnections(nextConnections);
+      }
 
       if (result.kind === 'workflow' && result.workflow) {
         const nextSteps = applySessionBindings(result.workflow.steps);
@@ -826,7 +914,7 @@ export const WorkflowEditorPage = () => {
     try {
       const reply = await askAgent({
         message,
-        providerId: 'qwen',
+        providerId,
         workflowId: id,
         history,
       });
@@ -1057,7 +1145,7 @@ export const WorkflowEditorPage = () => {
       <header className="canvas-chrome">
         <Link
           to="/workflows"
-          className="icon-btn"
+          className="icon-btn home-desktop"
           aria-label="К списку"
           onClick={() =>
             void persist(
@@ -1067,6 +1155,14 @@ export const WorkflowEditorPage = () => {
         >
           <Icon name="home" size={16} />
         </Link>
+        <button
+          type="button"
+          className="icon-btn home-mobile"
+          aria-label="Чаты"
+          onClick={() => setHistoryOpen(true)}
+        >
+          <Icon name="home" size={16} />
+        </button>
         <input
           className="canvas-title"
           value={name}
@@ -1198,6 +1294,7 @@ export const WorkflowEditorPage = () => {
               catalog={catalog}
               connections={connections}
               steps={workflow.steps}
+              preferredTelegramKind={preferredTelegramKind}
               runs={runs}
               live={botLive}
               onLaunch={() => void launchFromChat()}
@@ -1319,11 +1416,22 @@ export const WorkflowEditorPage = () => {
             <PromptForm
               prompt={composerValue}
               loading={composerBusy}
+              providers={agents}
+              providerId={providerId}
               onPromptChange={changeComposer}
+              onProviderChange={(id) => {
+                setProviderId(id);
+
+                try {
+                  localStorage.setItem(AGENT_STORAGE_KEY, id);
+                } catch {
+                  /* ignore */
+                }
+              }}
               onSubmit={() => void handleComposer()}
               placeholder={
                 buildFollowUp
-                  ? 'Ответьте на уточняющие вопросы агента'
+                  ? 'Спросите или измените сценарий'
                   : undefined
               }
             />
@@ -1370,6 +1478,14 @@ export const WorkflowEditorPage = () => {
           }}
         />
       ) : null}
+      <ChatHistoryDrawer
+        open={historyOpen}
+        current={workflow}
+        onClose={() => setHistoryOpen(false)}
+        onLeave={() =>
+          persist(workflowRef.current?.steps ?? workflow.steps)
+        }
+      />
     </div>
   );
 };

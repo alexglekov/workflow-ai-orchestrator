@@ -1,12 +1,18 @@
 import { http } from '~/shared/api/http';
-import type { TelegramStatus } from '../model/types';
+import type { TelegramKind, TelegramStatus } from '../model/types';
 
 export const fetchTelegramStatus = () => http<TelegramStatus>('/telegram/status');
 
-export const registerTelegram = (botToken: string) =>
+export const registerTelegram = (botToken: string, kind: TelegramKind = 'bot') =>
   http<TelegramStatus>('/telegram/register', {
     method: 'POST',
-    body: JSON.stringify({ botToken }),
+    body: JSON.stringify({ botToken, kind }),
+  });
+
+export const setTelegramKind = (connectionId: string, kind: TelegramKind) =>
+  http<TelegramStatus>('/telegram/kind', {
+    method: 'POST',
+    body: JSON.stringify({ connectionId, kind }),
   });
 
 export const prepareTelegram = () =>

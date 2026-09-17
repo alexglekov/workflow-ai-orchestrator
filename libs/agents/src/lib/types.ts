@@ -38,7 +38,12 @@ export interface AgentWorkflowContext {
 export interface AgentContext {
   workflow?: AgentWorkflowContext;
   connectors: AgentCatalogItem[];
-  connections: Array<{ name: string; connectorId: string }>;
+  connections: Array<{
+    name: string;
+    connectorId: string;
+    status?: string;
+    telegramKind?: 'bot' | 'business';
+  }>;
 }
 
 export interface AgentAskInput {
@@ -76,6 +81,8 @@ export interface AgentPlanResult {
   questions: string[];
   connectors: string[];
   name?: string;
+  telegramKind?: 'bot' | 'business';
+  schedule?: { everyMinutes: number; at?: string };
   steps: AgentPlannedStep[];
 }
 

@@ -20,6 +20,7 @@ import {
 } from './providers';
 import { completeLlm } from '../llm/complete';
 import { resolveLlm } from '../llm/resolve';
+import { humanText } from '../human-text';
 
 export type { SearchHit } from './rank';
 export type { SearchConfig } from './providers';
@@ -360,7 +361,7 @@ export const webFetch = async (options: {
       title: '',
       description: '',
       contentType: response.contentType,
-      text: JSON.stringify(json, null, 2).slice(0, maxChars),
+      text: humanText(json).slice(0, maxChars) || JSON.stringify(json).slice(0, maxChars),
       tables: [],
       json,
     };

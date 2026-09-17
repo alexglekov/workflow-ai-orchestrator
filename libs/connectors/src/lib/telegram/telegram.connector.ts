@@ -16,7 +16,7 @@ import {
   parseBusinessConnection,
   type TelegramMessage,
 } from './normalize';
-import { resolveBotToken } from './platform';
+import { resolveBotToken, resolveTelegramKind } from './platform';
 
 const resolveChatId = (
   params: Record<string, unknown>,
@@ -40,6 +40,10 @@ const resolveBusinessConnectionId = (
   input: ConnectorExecuteInput,
   chatId: string,
 ): string => {
+  if (resolveTelegramKind(credentials) === 'bot') {
+    return '';
+  }
+
   const fromInput = asRecord(input.context?.input);
   const fromPrevious = asRecord(input.previousResult);
   const ownerChatId = firstNonEmpty(
@@ -120,7 +124,7 @@ export const telegramConnector: Connector = {
   id: 'telegram',
   name: 'Telegram',
   description:
-    'Подключение через Telegram для бизнеса: диалоги клиентов и ответы от вашего имени',
+    'Обычный бот или бот для аккаунта Telegram: входящие и ответы',
   credentialFields: [
     {
       key: 'botToken',
@@ -139,7 +143,7 @@ export const telegramConnector: Connector = {
       id: 'get_updates',
       name: 'Получить входящие',
       description:
-        'Новые сообщения Telegram для бизнеса или бота. Голос можно расшифровать',
+        'Новые сообщения боту или аккаунту. Голос можно расшифровать',
       paramsSchema: {
         transcribe: {
           type: 'boolean',
@@ -204,7 +208,7 @@ export const telegramConnector: Connector = {
     try {
       const businessId = credentials['businessConnectionId'];
 
-      if (businessId) {
+      if (resolveTelegramKind(credentials) === 'business' && businessId) {
         const body = await telegramCall<Record<string, unknown>>(
           token,
           'getBusinessConnection',

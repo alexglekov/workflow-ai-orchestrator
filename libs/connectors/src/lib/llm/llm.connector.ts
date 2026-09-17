@@ -8,6 +8,7 @@ import {
   interpolate,
   humanText,
 } from '../interpolate';
+import { isJsonDump } from '../human-text';
 import { completeLlm } from './complete';
 import { parseJsonObject } from './parse-json';
 import { resolveLlm } from './resolve';
@@ -55,35 +56,19 @@ const sourceText = (
   previous: unknown,
 ): string => {
   const fromParams = firstNonEmpty(params['text'], params['input']);
-  const record =
-    previous && typeof previous === 'object'
-      ? (previous as Record<string, unknown>)
-      : {};
-  const tables = Array.isArray(record['tables'])
-    ? `\n\nТаблицы:\n${JSON.stringify(record['tables']).slice(0, 8000)}`
-    : '';
-  const fromPrevious = firstNonEmpty(
-    record['text'],
-    record['subject'],
-    record['body'],
-    typeof previous === 'string' ? previous : '',
-  );
 
   if (fromParams) {
     return fromParams;
-  }
-
-  if (fromPrevious || tables) {
-    return `${fromPrevious}${tables}`.trim();
   }
 
   return humanText(previous);
 };
 
 const GENERATE_SYSTEM = [
-  'Ты пишешь готовый текст, который сразу уйдёт пользователю (Telegram, почта, отчёт).',
+  'Ты пишешь готовый текст, который сразу уйдёт человеку (Telegram, почта, чат, отчёт).',
   'Верни только этот текст: без преамбулы, без кавычек вокруг всего ответа, без markdown-ограждений.',
-  'Запрещено: код, функции, скрипты, JSON, инструкции для n8n/Make/Pipedream, комментарии //, блоки ```.',
+  'Запрещено: код, функции, скрипты, JSON, YAML, дампы объектов, инструкции для n8n/Make/Pipedream, комментарии //, блоки ```.',
+  'Числа, курсы и даты пиши словами и цифрами, как в сообщении человеку. Не копируй сырой JSON API.',
   'Если в контексте есть числа — подставь их в текст. Не описывай, как посчитать, а посчитай сам.',
 ].join(' ');
 
@@ -143,10 +128,10 @@ const generatePlainText = async (
 
   let generated = unwrapFences(await ask());
 
-  if (looksLikeCode(generated)) {
+  if (looksLikeCode(generated) || isJsonDump(generated)) {
     generated = unwrapFences(
       await ask(
-        'Предыдущий ответ был кодом. Сейчас напиши только готовое сообщение человеку, с уже подставленными числами и эмодзи, без кода.',
+        'Предыдущий ответ был кодом или JSON. Сейчас напиши только готовое сообщение человеку, с уже подставленными числами, без кода и без JSON.',
       ),
     );
   }

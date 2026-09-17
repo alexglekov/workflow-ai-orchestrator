@@ -24,13 +24,13 @@ describe('interpolate', () => {
     assert.deepEqual(value, { text: 'счёт / Москва' });
   });
 
-  it('stringifies objects for {{previous}}', () => {
+  it('writes leftover objects as labeled lines', () => {
     const value = interpolate(
       '{{previous}}',
       templateContext({ previous: { a: 1 } }),
     );
 
-    assert.equal(value, '{\n  "a": 1\n}');
+    assert.equal(value, 'A: 1');
   });
 
   it('writes telegram payloads as a human message', () => {
