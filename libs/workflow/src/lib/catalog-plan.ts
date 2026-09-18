@@ -1,4 +1,16 @@
 import type { ParsedStep } from './types';
+import {
+  shapeSearchQuery,
+  searchFreshness,
+} from '../../../connectors/src/lib/web/query';
+import {
+  namedSite,
+  p2pPageUrl,
+  p2pSearchQuery,
+  wantsPageVisit,
+  bestchangePageUrl,
+  exchangePair,
+} from '../../../connectors/src/lib/web/site';
 
 export type PlanCatalogAction = {
   id: string;
@@ -23,6 +35,8 @@ const PIPELINE = [
   'web.rates',
   'excel.find_file',
   'excel.read_rows',
+  'excel.find_rows',
+  'excel.apply',
   'onec.query',
   'onec.get',
   'transform.filter',
@@ -36,6 +50,7 @@ const PIPELINE = [
   'onec.create_record',
   'onec.update',
   'excel.append_row',
+  'excel.update_row',
   'mail.send',
   'telegram.send_voice',
   'telegram.send_message',
@@ -44,35 +59,32 @@ const PIPELINE = [
 const ACTION_HINTS: Record<string, string> = {
   'mail.fetch_new':
     'входящие непрочитанные проверить почту inbox imap получить письма заявки новые письма',
-  'mail.search':
-    'переписка корреспонденция найти письма поиск mailbox since',
-  'mail.send':
-    'отправить письмо исходящее smtp получателю email',
-  'web.search':
-    'найди поиск google гугл инн inn справка реквизит',
-  'web.fetch': 'открой страницу сайт url скачать http https',
-  'browser.open':
-    'браузер playwright javascript spa p2p клик логин chromium',
-  'web.rates':
-    'курс bestchange обменник монитор p2p',
-  'excel.find_file': 'найди файл диск drive яндекс google xlsx',
-  'excel.read_rows': 'прочитай прочитать строки лист таблицу excel счета',
-  'excel.append_row': 'добавь допиши запиши строку в таблицу excel',
+  'mail.search': 'переписка корреспонденция найти письма поиск mailbox since',
+  'mail.send': 'отправить письмо исходящее smtp получателю email',
+  'web.search': 'найди поиск google гугл инн inn справка реквизит зайди открой сайт',
+  'web.fetch': 'открой страницу сайт url скачать http https зайди парсинг',
+  'browser.open': 'браузер playwright spa клик логин chromium',
+  'web.rates': 'курс bestchange обменник монитор p2p',
+  'excel.find_file': 'найди файл диск drive яндекс google xlsx таблицу открой',
+  'excel.read_rows':
+    'прочитай прочитать строки лист таблицу excel счета яндекс',
+  'excel.find_rows': 'найди запись строку в таблице ищи кто есть excel ячейк',
+  'excel.append_row': 'добавь допиши запиши строку в таблицу excel яндекс',
+  'excel.update_row': 'обнови измени поправь запись строку в таблице excel',
+  'excel.apply':
+    'посчитай итоги дубли сортируй очисти колонку заполни формулу переименуй перезапиши замени сводку среднее процент уникальн удали запиши занеси внеси excel таблицу лист',
   'llm.extract':
     'извлеки достань поля json курс bestchange структурируй инн реквизит btc ltc usdt',
-  'llm.classify':
-    'классифицируй намерение метка категория вмешаться срочно',
+  'llm.classify': 'классифицируй намерение метка категория вмешаться срочно',
   'llm.generate':
     'напиши сгенерируй текст персонализированное сообщение контекст диалог ответ',
   'llm.transcribe': 'распознай голос транскрипт speech stt whisper',
   'llm.speak': 'озвучь голосовое tts речь',
-  'transform.filter':
-    'фильтр отфильтруй больше меньше просрочен сумма 500',
+  'transform.filter': 'фильтр отфильтруй больше меньше просрочен сумма 500',
   'transform.sort': 'сортируй отсортируй по убыванию просмотрам',
   'transform.pick': 'выбери поля оставь колонки',
   'transform.join': 'склей список строк отчёт перечень',
-  'transform.template':
-    'формат шаблон отчёт текст btc-rub ltc-rub usdt-rub',
+  'transform.template': 'формат шаблон отчёт текст btc-rub ltc-rub usdt-rub',
   'memory.get': 'память прочитай ключ повтор вопрос',
   'memory.set': 'память запиши сохрани ключ',
   'onec.query':
@@ -83,14 +95,15 @@ const ACTION_HINTS: Record<string, string> = {
   'telegram.get_updates':
     'входящие сообщения бот клиент написал диалог getupdates webhook',
   'telegram.send_voice': 'голосовое войес voice озвучь повтор',
-  'telegram.send_message': 'телеграм telegram тг уведомление сообщение бот отчёт',
+  'telegram.send_message':
+    'телеграм telegram тг уведомление сообщение бот отчёт',
 };
 
 const CONNECTOR_HINTS: Record<string, string> = {
   mail: 'почта mail email письмо smtp imap переписка',
   web: 'сайт веб web инн inn http https курс bestchange справочн гугл',
-  browser: 'браузер playwright javascript spa p2p chromium',
-  excel: 'excel эксель таблица xlsx диск счета',
+  browser: 'браузер playwright spa chromium',
+  excel: 'excel эксель таблица xlsx диск счета яндекс yandex sheets',
   llm: 'llm нейросеть извлечь классифицировать сгенерировать gpt qwen голос',
   transform: 'фильтр шаблон отчёт преобразовать transform',
   memory: 'память memory ключ повтор',
@@ -103,6 +116,7 @@ const LIST_PRODUCERS = new Set([
   'mail.search',
   'telegram.get_updates',
   'excel.read_rows',
+  'excel.find_rows',
   'onec.query',
   'transform.filter',
   'transform.sort',
@@ -121,6 +135,7 @@ const NEVER_ITERATE = new Set([
   'transform.pick',
   'transform.join',
   'transform.template',
+  'excel.apply',
 ]);
 
 const tokenize = (value: string): string[] =>
@@ -176,34 +191,11 @@ const scoreAction = (
 const firstUrl = (prompt: string): string =>
   (prompt.match(/https?:\/\/[^\s)\]>'"]+/i)?.[0] || '').replace(/[.,;]+$/u, '');
 
-const NAMED_SITES: Array<[RegExp, string]> = [
-  [/\bbinance\b/i, 'binance.com'],
-  [/\bbybit\b/i, 'bybit.com'],
-  [/\bokx\b/i, 'okx.com'],
-  [/\bcoinbase\b/i, 'coinbase.com'],
-  [/\bkraken\b/i, 'kraken.com'],
-  [/\bkucoin\b/i, 'kucoin.com'],
-];
+const isOpenWebQuery = (text: string): boolean =>
+  /p2p|п2п|оферт|лучш(?:ие|их)\s+предложен/i.test(text);
 
-const NAMED_EXCHANGE = /\b(binance|bybit|okx|coinbase|kraken|kucoin|huobi|mexc)\b/i;
-
-const searchSiteFromPrompt = (prompt: string): string => {
-  for (const [pattern, site] of NAMED_SITES) {
-    if (pattern.test(prompt)) {
-      return site;
-    }
-  }
-
-  const host = prompt.match(
-    /\b(?:www\.)?([a-z0-9-]+\.(?:com|ru|io|net|org|co))\b/i,
-  )?.[1];
-
-  if (host && !/bestchange/i.test(host)) {
-    return host.replace(/^www\./i, '');
-  }
-
-  return '';
-};
+const searchSiteFromPrompt = (prompt: string): string =>
+  namedSite(prompt)?.host || '';
 
 const spotSymbol = (prompt: string): string => {
   const match = prompt.match(
@@ -228,13 +220,15 @@ const publicTickerUrl = (prompt: string): string => {
 };
 
 const wantsBestChangeRates = (prompt: string): boolean =>
-  /bestchange/i.test(prompt) ||
-  (/курс/i.test(prompt) &&
-    /btc|ltc|usdt/i.test(prompt) &&
-    !NAMED_EXCHANGE.test(prompt));
+  /bestchange/i.test(prompt) &&
+  /курс/i.test(prompt) &&
+  !wantsPageVisit(prompt) &&
+  !/топ|предложен|оферт/i.test(prompt);
 
 const isExcelUrl = (url: string): boolean =>
-  /xlsx|docs\.google|drive\.google|disk\.yandex|yadi\.sk/i.test(url);
+  /xlsx|ods|docs\.google|drive\.google|disk\.yandex|yadi\.sk|docs\.yandex|spreadsheet\.yandex|yandex\.(?:ru|com)\/(?:disk|docs)/i.test(
+    url,
+  );
 
 const isSocialUrl = (url: string): boolean =>
   /(?:instagram\.com|instagr\.am|vk\.com|vkontakte\.ru|linkedin\.com)/i.test(
@@ -246,35 +240,96 @@ const firstEmail = (prompt: string): string =>
 
 const excelFileName = (prompt: string): string =>
   prompt.match(/["«]([^"»]+\.xlsx?)["»]/i)?.[1] ||
-  prompt.match(/\b([\w.-]+\.xlsx?)\b/i)?.[1] ||
+  prompt.match(/([\p{L}\p{N}._-]+\.xlsx?)/iu)?.[1] ||
+  prompt.match(
+    /(?:таблиц\p{L}*|файл\p{L}*|excel|яндекс)\s+["«]([^"»]+)["»]/iu,
+  )?.[1] ||
   '';
 
 // \b не работает с кириллицей, поэтому границы слов — через \p{L} с флагом u.
-const SEARCH_NOISE = [
-  /(?<![\p{L}])кажд(?:ый|ое|ую)\s+(?:день|утро|час|неделю|минуту)(?![\p{L}])/giu,
-  /(?<![\p{L}])(?:ежедневно|ежечасно|по расписанию)(?![\p{L}])/giu,
-  /(?<![\p{L}])каждые\s+\d+\s*\p{L}*/giu,
-  /(?<![\p{L}])в\s+\d{1,2}(?:[:.]\d{2})?(?:\s*(?:утра|вечера|часов|час|ч))?(?![\p{L}\d])/giu,
-  /(?<![\p{L}])(?:пришли|присылай|отправь|отправляй|напиши|сообщи|скинь|добавь|сохрани|запиши)[^,.;]*?(?:телеграм\p{L}*|telegram|почт\p{L}*|email|mail|excel|таблиц\p{L}*|чат\p{L}*|бот\p{L}*)(?![\p{L}])/giu,
-  /(?<![\p{L}])(?:в|на)\s+(?:телеграм\p{L}*|telegram|почту|excel|таблицу)(?![\p{L}])/giu,
-  /(?<![\p{L}])(?:в|во)\s+интернете(?![\p{L}])/giu,
-  /(?<![\p{L}])(?:найди|найти|поищи|проверь|узнай|посмотри|подскажи|нужно|надо|пожалуйста)(?![\p{L}])/giu,
-];
-
-const DANGLING = /^(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же)(?![\p{L}]))+|(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же)(?![\p{L}]))+$/giu;
 
 /** Из формулировки задачи делает короткую поисковую фразу без расписания и доставки. */
-export const searchPhrase = (prompt: string): string => {
-  const cleaned = SEARCH_NOISE.reduce(
-    (text, pattern) => text.replace(pattern, ' '),
-    prompt,
-  )
-    .replace(/\s*[,;]\s*/g, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(DANGLING, '')
-    .trim();
+export const searchPhrase = (prompt: string): string =>
+  p2pSearchQuery(prompt) || shapeSearchQuery(prompt, { stamp: false });
 
-  return (cleaned.length >= 3 ? cleaned : prompt.trim()).slice(0, 200);
+const namesTelegram = (text: string): boolean =>
+  /телеграм|telegram|(?<![\p{L}])тг(?![\p{L}])/iu.test(text);
+
+const rejectsTelegram = (text: string): boolean =>
+  /не\s+в\s+(?:телеграм|telegram|тг)|не\s+(?:в\s+)?телеграм|без\s+телеграм/iu.test(
+    text,
+  );
+
+/** «В чат» / «сюда» — этот чат приложения, не Telegram, если тг не назвали. */
+export const wantsInAppChat = (text: string): boolean => {
+  if (namesTelegram(text) && !rejectsTelegram(text)) {
+    return false;
+  }
+
+  return (
+    /(?:^|[^\p{L}])(?:в|сюда(?:\s+в)?)\s+(?:этот\s+|наш\s+)?чат(?![\p{L}])/iu.test(
+      text,
+    ) ||
+    /в этом чате/i.test(text) ||
+    /(?:напиши|отправь|пришли)(?:те)?\s+(?:мне\s+)?сюда(?![\p{L}])/iu.test(text)
+  );
+};
+
+export const scrubSearchPlan = <
+  T extends {
+    connectorId: string;
+    action: string;
+    params?: Record<string, unknown>;
+  },
+>(
+  steps: T[],
+  source = '',
+): T[] => {
+  const seen = new Set<string>();
+
+  return steps.flatMap((step) => {
+    if (step.connectorId !== 'web' || step.action !== 'search') {
+      return [step];
+    }
+
+    const params = { ...(step.params ?? {}) };
+    const query = searchPhrase(String(params.query || source));
+    const blob = `${query} ${source}`;
+    const site = namedSite(blob)?.host || namedSite(source)?.host;
+    const p2p = isOpenWebQuery(blob);
+    const openWeb = p2p && !site;
+
+    if (query) {
+      params.query = query;
+    }
+
+    if (site && !params.site) {
+      params.site = site;
+    }
+
+    if (openWeb) {
+      delete params.site;
+    }
+
+    const freshness = searchFreshness(blob);
+
+    if (freshness) {
+      params.freshness =
+        p2p && params.freshness === 'day' ? 'week' : params.freshness || freshness;
+    } else if (openWeb) {
+      delete params.freshness;
+    }
+
+    const key = `${params.query}|${params.site || ''}|${params.freshness || ''}`;
+
+    if (seen.has(key)) {
+      return [];
+    }
+
+    seen.add(key);
+
+    return [{ ...step, params }];
+  });
 };
 
 const fillParams = (
@@ -299,11 +354,19 @@ const fillParams = (
   }
 
   if (connectorId === 'web' && actionId === 'rates') {
-    return {};
+    const pair = exchangePair(prompt);
+
+    return {
+      ...(pair?.from ? { from: pair.from } : {}),
+      ...(pair?.to ? { to: pair.to } : {}),
+      limit: 10,
+    };
   }
 
   if (connectorId === 'browser' && actionId === 'open') {
-    return url && !isExcelUrl(url) ? { url } : {};
+    return url && !isExcelUrl(url)
+      ? { url, waitUntil: 'domcontentloaded' }
+      : { waitUntil: 'domcontentloaded' };
   }
 
   if (connectorId === 'mail' && actionId === 'fetch_new') {
@@ -326,27 +389,48 @@ const fillParams = (
 
   if (connectorId === 'web' && actionId === 'search') {
     const site = searchSiteFromPrompt(prompt);
+    const openWeb = isOpenWebQuery(prompt) && !site;
+    const query = searchPhrase(prompt);
+    const freshness = searchFreshness(`${query} ${prompt}`);
 
     return {
-      query: searchPhrase(prompt),
-      limit: 5,
-      ...(site ? { site, freshness: 'day' } : {}),
+      query,
+      limit: freshness ? 8 : 5,
+      ...(!openWeb && site ? { site } : {}),
+      ...(freshness
+        ? { freshness: isOpenWebQuery(prompt) && freshness === 'day' ? 'week' : freshness }
+        : {}),
     };
   }
 
   if (connectorId === 'web' && actionId === 'fetch') {
     const ticker = publicTickerUrl(prompt);
+    const p2p = p2pPageUrl(prompt);
+    const bestchange = bestchangePageUrl(prompt);
 
     if (ticker) {
       return { url: ticker };
+    }
+
+    if (p2p) {
+      return { url: p2p };
+    }
+
+    if (bestchange) {
+      return { url: bestchange };
     }
 
     if (url && !isExcelUrl(url)) {
       return { url };
     }
 
+    const site = searchSiteFromPrompt(prompt);
+
     if (hasSearch) {
-      return { url: '{{previous.results.0.url}}' };
+      return {
+        url: '{{previous.results.0.url}}',
+        ...(site ? { site } : {}),
+      };
     }
 
     return url ? { url } : {};
@@ -383,10 +467,29 @@ const fillParams = (
   }
 
   if (connectorId === 'llm' && actionId === 'generate') {
+    const fromSearch = selected.some(
+      (step) => step.connectorId === 'web' && step.action === 'search',
+    );
+    const fromFetch = selected.some(
+      (step) => step.connectorId === 'web' && step.action === 'fetch',
+    );
+    const task = prompt.trim().replace(/\s+/g, ' ').slice(0, 300);
+    const pageContext = fromFetch || fromSearch;
+
     return {
-      instruction:
-        'Напиши готовый текст для человека (сообщение в Telegram или отчёт). Без кода, JSON и скриптов — только сам текст.',
-      text: '{{previous}}',
+      instruction: pageContext
+        ? [
+            `Запрос пользователя: «${task}».`,
+            fromFetch
+              ? 'Ниже — текст и таблицы открытой страницы. Ответь строго по запросу: только нужные факты, запрошенное количество пунктов и формат.'
+              : 'Ниже — результаты поиска и текст страниц. Ответь строго на запрос: только относящиеся к делу факты, запрошенное количество и формат.',
+            'Бери свежие числа и даты со страницы. Не выдумывай и не подставляй знания модели. Без преамбулы, кода, JSON и списка источников.',
+          ].join(' ')
+        : [
+            `Запрос пользователя: «${task}».`,
+            'Напиши готовый ответ человеку строго по этому запросу. Без кода, JSON и скриптов — только сам текст.',
+          ].join(' '),
+      text: pageContext ? '{{previous.text}}' : '{{previous}}',
     };
   }
 
@@ -433,6 +536,22 @@ const fillParams = (
 
     if (fileName) {
       params['fileName'] = fileName;
+    }
+
+    if (actionId === 'apply') {
+      params['instruction'] = prompt.trim().slice(0, 2000);
+    }
+
+    if (actionId === 'find_rows' || actionId === 'update_row') {
+      const match = prompt.match(
+        /(?:по\s+(?:полю|колонке|столбцу)|где)\s+["«]?([^"»,]{2,40}?)["»]?\s*(?:=|равно|:|это)\s*["«]?([^"»\n,]{1,80})["»]?/iu,
+      );
+
+      if (match?.[1] && match[2]) {
+        params['field'] = match[1].trim();
+        params['value'] = match[2].trim();
+        params['op'] = actionId === 'find_rows' ? 'contains' : 'eq';
+      }
     }
 
     return params;
@@ -667,19 +786,16 @@ export const planFromCatalog = (
 
   let withFetch = unique;
 
-  if (
-    unique.some((item) => item.connector.id === 'web' && item.action.id === 'search')
-  ) {
-    withFetch = ensureAction(withFetch, 'web', 'fetch');
-  }
-
   if (webUrl && !isExcelUrl(webUrl) && !isSocialUrl(webUrl) && !wantsRates) {
     withFetch = ensureAction(withFetch, 'web', 'fetch');
   }
 
   if (wantsRates) {
     withFetch = ensureAction(withFetch, 'web', 'rates');
-  } else if (searchSiteFromPrompt(text) && !publicTickerUrl(text)) {
+  } else if (
+    (searchSiteFromPrompt(text) && !publicTickerUrl(text)) ||
+    /(найд|поищ|гугл|google|зайди)/i.test(text)
+  ) {
     withFetch = ensureAction(withFetch, 'web', 'search');
   }
 
@@ -694,11 +810,50 @@ export const planFromCatalog = (
   }
 
   if (
-    /браузер|playwright|javascript|spa|(bestchange.*p2p)|(p2p.*bestchange)/i.test(
-      text,
-    )
+    /браузер|playwright|spa/i.test(text) ||
+    (/javascript/i.test(text) && /браузер|клик|логин|chromium/i.test(text))
   ) {
     withFetch = ensureAction(withFetch, 'browser', 'open');
+  }
+
+  const findAndTell =
+    /(найд|поищ|зайди)/i.test(text) && /(сообщ|пришл|отправ|сводк)/i.test(text);
+  const parsePage =
+    !wantsRates &&
+    !publicTickerUrl(text) &&
+    (findAndTell ||
+      wantsPageVisit(text) ||
+      (Boolean(namedSite(text)) &&
+        /сводк|отч[её]т|топ\s*\d|предложен/i.test(text)));
+
+  if (findAndTell) {
+    withFetch = withFetch.filter((item) => item.connector.id !== 'browser');
+    withFetch = ensureAction(withFetch, 'web', 'search');
+    withFetch = ensureAction(withFetch, 'llm', 'generate');
+  }
+
+  if (parsePage) {
+    if (!/браузер|playwright|chromium/i.test(text)) {
+      withFetch = withFetch.filter((item) => item.connector.id !== 'browser');
+    }
+    withFetch = ensureAction(withFetch, 'web', 'search');
+    withFetch = ensureAction(withFetch, 'web', 'fetch');
+    withFetch = ensureAction(withFetch, 'llm', 'generate');
+  }
+
+  if (wantsInAppChat(text) || /сводк|отч[её]т/i.test(text)) {
+    withFetch = ensureAction(withFetch, 'llm', 'generate');
+  }
+
+  if (wantsInAppChat(text)) {
+    withFetch = withFetch.filter(
+      (item) =>
+        !(
+          (item.connector.id === 'telegram' &&
+            item.action.id === 'send_message') ||
+          (item.connector.id === 'mail' && item.action.id === 'send')
+        ),
+    );
   }
 
   const wantsMailSearch =
@@ -738,13 +893,119 @@ export const planFromCatalog = (
     withFetch = ensureAction(withFetch, 'onec', 'update');
   }
 
+  const mentionsExcel =
+    /excel|эксел|xlsx|таблиц|яндекс\s*таблиц|google\s*sheet|(?<![\p{L}])лист[ауе]?(?![\p{L}])/iu.test(
+      text,
+    );
+  const wantsExcelFind =
+    /(найд\p{L}*|ищ\p{L}*).{0,24}(запис|строк)|в\s+таблиц\p{L}*.{0,12}(найд\p{L}*|ищ\p{L}*)/iu.test(
+      text,
+    );
+  const wantsExcelWrite =
+    /(запиш\p{L}*|допиш\p{L}*|добав\p{L}*\s+строк)/iu.test(text);
+  const wantsExcelRead = /прочит\p{L}*.{0,20}(таблиц|excel|лист|строк)/iu.test(
+    text,
+  );
+  const wantsExcelUpdate =
+    /обнов\p{L}*.{0,20}(строк|запис|таблиц|excel)|поправ\p{L}*\s+запис/iu.test(
+      text,
+    );
+  const excelWork =
+    /(посчита|итог|удал|дубл|сортир|очист|колонк|столбц|формул|заполн|переимен|перезапис|замен|объедин|уникальн|добав\p{L}*\s+колон|calculate|delete|sort|duplicate|column)/iu.test(
+      text,
+    );
+  const fillFromSearch =
+    mentionsExcel &&
+    /(запиш|заполн|занес|внеси|положи)/i.test(text) &&
+    /(найд|поищ|интернет|сайт|из\s+поиск|web)/i.test(text);
+  const hasMailFetch = withFetch.some(
+    (item) =>
+      item.connector.id === 'mail' &&
+      (item.action.id === 'fetch_new' || item.action.id === 'search'),
+  );
+  const mailToSheet =
+    hasMailFetch && wantsExcelWrite && !excelWork && !fillFromSearch;
+  const wantsExcelApply =
+    mentionsExcel &&
+    !mailToSheet &&
+    (excelWork ||
+      fillFromSearch ||
+      wantsExcelWrite ||
+      /(сделай|поработай)\s+.{0,40}(таблиц|excel|лист)/i.test(text)) &&
+    !(wantsExcelFind && !wantsExcelWrite && !excelWork && !fillFromSearch);
+
+  if (wantsExcelApply) {
+    withFetch = ensureAction(withFetch, 'excel', 'apply');
+
+    if (fillFromSearch) {
+      withFetch = ensureAction(withFetch, 'web', 'fetch');
+    }
+  }
+
+  if (
+    wantsExcelApply ||
+    wantsExcelFind ||
+    wantsExcelWrite ||
+    wantsExcelRead ||
+    wantsExcelUpdate
+  ) {
+    withFetch = withFetch.filter((item) => {
+      if (item.connector.id !== 'excel') {
+        return true;
+      }
+
+      if (wantsExcelApply) {
+        return item.action.id === 'apply';
+      }
+
+      if (wantsExcelUpdate) {
+        return item.action.id === 'update_row';
+      }
+
+      if (wantsExcelFind) {
+        return item.action.id === 'find_rows';
+      }
+
+      if (mailToSheet || wantsExcelWrite) {
+        return item.action.id === 'append_row';
+      }
+
+      return item.action.id === 'read_rows';
+    });
+  }
+
+  // После Tavily всегда парсим найденную страницу и разбираем её через LLM.
+  const hasWebSearch = withFetch.some(
+    (item) => item.connector.id === 'web' && item.action.id === 'search',
+  );
+  const hasWebRates = withFetch.some(
+    (item) => item.connector.id === 'web' && item.action.id === 'rates',
+  );
+
+  if (hasWebSearch && !hasWebRates && !wantsExcelApply) {
+    withFetch = ensureAction(withFetch, 'web', 'fetch');
+    withFetch = ensureAction(withFetch, 'llm', 'generate');
+  }
+
   const ordered = [...withFetch].sort(
     (left, right) =>
       pipelineIndex(left.connector.id, left.action.id) -
       pipelineIndex(right.connector.id, right.action.id),
   );
+  const seen = new Set<string>();
+  const uniqueOrdered = ordered.filter((item) => {
+    const key = `${item.connector.id}.${item.action.id}`;
 
-  const selected = ordered.map((item) => ({
+    if (seen.has(key)) {
+      return false;
+    }
+
+    seen.add(key);
+
+    return true;
+  });
+
+  const selected = uniqueOrdered.map((item) => ({
     connectorId: item.connector.id,
     action: item.action.id,
   }));
@@ -752,7 +1013,7 @@ export const planFromCatalog = (
     LIST_PRODUCERS.has(`${step.connectorId}.${step.action}`),
   );
 
-  return ordered.slice(0, 8).map((item) => {
+  return uniqueOrdered.slice(0, 8).map((item) => {
     const key = `${item.connector.id}.${item.action.id}`;
 
     return {

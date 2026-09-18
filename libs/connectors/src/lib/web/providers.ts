@@ -1,4 +1,3 @@
-import { chromium } from 'playwright';
 import { decodeEntities, stripHtml } from './html';
 import { fetchPublic } from './fetch-public';
 import { isUsableUrl } from './rank';
@@ -6,6 +5,7 @@ import { looksRelevant } from './relevance';
 import type { SearchHit } from './rank';
 import { groundedWebSearch } from '../llm/grounded-search';
 import { resolveLlm, type ResolvedLlm } from '../llm/resolve';
+import { CHROME_UA, gotoPage, launchChromium } from '../browser/chromium';
 
 export type SearchConfig = {
   braveKey?: string;
@@ -27,6 +27,7 @@ export type SearchOptions = {
   region: string;
   freshness?: string;
   timeoutMs: number;
+  site?: string;
 };
 
 export type SearchProvider = {
@@ -45,12 +46,16 @@ const hit = (
   url: unknown,
   snippet: unknown,
   body?: unknown,
+  publishedAt?: unknown,
 ): SearchHit => ({
   provider,
   title: text(title, 200),
   url: String(url ?? '').trim(),
   snippet: text(snippet, 400),
   ...(body ? { text: text(body, 4000) } : {}),
+  ...(typeof publishedAt === 'string' && publishedAt.trim()
+    ? { publishedAt: publishedAt.trim() }
+    : {}),
 });
 
 const freshnessMap: Record<string, { brave: string; google: string; serper: string }> = {
@@ -207,34 +212,144 @@ const serper: SearchProvider = {
   },
 };
 
+const tavilyTimeRange = (freshness?: string): string | undefined => {
+  if (
+    freshness === 'day' ||
+    freshness === 'week' ||
+    freshness === 'month' ||
+    freshness === 'year'
+  ) {
+    return freshness;
+  }
+
+  return undefined;
+};
+
+const parseTavilyHits = (
+  body: string,
+  query: string,
+): SearchHit[] => {
+  const parsed = JSON.parse(body) as {
+    answer?: string;
+    results?: Array<{
+      title?: string;
+      url?: string;
+      content?: string;
+      raw_content?: string;
+      published_date?: string;
+    }>;
+  };
+  const results = (parsed.results ?? [])
+    .map((item) =>
+      hit(
+        'tavily',
+        item.title,
+        item.url,
+        item.content,
+        item.raw_content || item.content,
+        item.published_date,
+      ),
+    )
+    .filter((item) => item.url);
+
+  if (parsed.answer?.trim()) {
+    const source = results[0]?.url || 'https://tavily.com/';
+    results.unshift({
+      ...hit('tavily', query, source, parsed.answer, parsed.answer),
+      featured: true,
+    });
+  }
+
+  return results;
+};
+
 const tavily: SearchProvider = {
   id: 'tavily',
   keyed: true,
   enabled: (config) => Boolean(config.tavilyKey),
   run: async (options, config) => {
-    const response = await fetchPublic('https://api.tavily.com/search', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Accept: 'application/json',
-        Authorization: `Bearer ${config.tavilyKey}`,
-      },
-      body: JSON.stringify({
+    const site = (options.site || '')
+      .trim()
+      .replace(/^https?:\/\//i, '')
+      .replace(/\/.*$/, '')
+      .replace(/^www\./i, '');
+    const timeRange = tavilyTimeRange(options.freshness);
+    const request = async (searchDepth: 'advanced' | 'basic') => {
+      const body: Record<string, unknown> = {
+        api_key: config.tavilyKey,
         query: options.query,
-        max_results: options.limit,
-        search_depth: 'advanced',
-        include_answer: false,
-        ...(options.freshness === 'day' ? { days: 1 } : {}),
-      }),
-      timeoutMs: options.timeoutMs,
-    });
-    const parsed = JSON.parse(response.body) as {
-      results?: Array<{ title?: string; url?: string; content?: string; raw_content?: string }>;
+        max_results: Math.min(Math.max(options.limit, 1), 20),
+        search_depth: searchDepth,
+        include_answer: true,
+        include_raw_content: false,
+        include_images: false,
+      };
+
+      if (site) {
+        body['include_domains'] = [site];
+      }
+
+      if (timeRange) {
+        body['time_range'] = timeRange;
+
+        if (timeRange === 'day' && /новост|news/i.test(options.query)) {
+          body['topic'] = 'news';
+          body['days'] = 1;
+        }
+      }
+
+      try {
+        const response = await fetchPublic('https://api.tavily.com/search', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Accept: 'application/json',
+            Authorization: `Bearer ${config.tavilyKey}`,
+          },
+          body: JSON.stringify(body),
+          timeoutMs: Math.max(options.timeoutMs, 30_000),
+          retries: 2,
+        });
+
+        return parseTavilyHits(response.body, options.query);
+      } catch (error) {
+        const status = (error as { status?: number }).status;
+
+        if (status === 401) {
+          throw new Error('Tavily: неверный API-ключ');
+        }
+
+        if (status === 429 || status === 432) {
+          throw new Error(
+            'Tavily: превышен лимит запросов, подождите и повторите',
+          );
+        }
+
+        throw new Error(
+          `Tavily: ${error instanceof Error ? error.message : 'поиск не удался'}`,
+        );
+      }
     };
 
-    return (parsed.results ?? []).map((item) =>
-      hit('tavily', item.title, item.url, item.content, item.raw_content || item.content),
-    );
+    try {
+      const advanced = await request('advanced');
+
+      if (advanced.length) {
+        return advanced;
+      }
+    } catch (error) {
+      if ((error as Error).message === 'Tavily: неверный API-ключ') {
+        throw error;
+      }
+
+      const basic = await request('basic').catch(() => {
+        throw error;
+      });
+
+      return basic;
+    }
+
+    return request('basic').catch(() => []);
   },
 };
 
@@ -640,26 +755,21 @@ const browserSearch: SearchProvider = {
   keyed: false,
   enabled: (config) => config.allowBrowser !== false,
   run: async (options) => {
-    const browser = await chromium.launch({
-      headless: true,
-      executablePath:
-        process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] || undefined,
-      args: ['--disable-dev-shm-usage', '--no-sandbox'],
-    });
+    const browser = await launchChromium();
 
     try {
       const context = await browser.newContext({
         locale: `${options.lang}-${options.region.toUpperCase()}`,
-        userAgent:
-          'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
+        userAgent: CHROME_UA,
         viewport: { width: 1280, height: 900 },
+        ignoreHTTPSErrors: true,
       });
       const page = await context.newPage();
       const errors: string[] = [];
 
       for (const engine of SEARCH_ENGINES) {
         try {
-          await page.goto(engine.url(options), {
+          await gotoPage(page, engine.url(options), {
             waitUntil: 'domcontentloaded',
             timeout: options.timeoutMs,
           });
@@ -734,21 +844,8 @@ const browserSearch: SearchProvider = {
   },
 };
 
-/** Сначала поиск Qwen (`enable_search`), затем ключи и скрейп. */
-export const SEARCH_PROVIDERS: SearchProvider[] = [
-  brave,
-  googleCse,
-  serper,
-  tavily,
-  llmSearch,
-  duckduckgoLite,
-  bing,
-  browserSearch,
-  braveHtml,
-  duckduckgo,
-  mojeek,
-  wikipedia,
-];
+/** Поиск в вебе — только Tavily. Остальные движки не вызываются. */
+export const SEARCH_PROVIDERS: SearchProvider[] = [tavily];
 
 export const providerById = (id: string): SearchProvider | undefined =>
   SEARCH_PROVIDERS.find((provider) => provider.id === id);

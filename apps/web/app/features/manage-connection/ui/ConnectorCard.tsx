@@ -15,6 +15,7 @@ import { ConnectorMark } from '~/shared/ui/ConnectorMark';
 import { Icon } from '~/shared/ui/Icon';
 import { StatusBadge } from '~/shared/ui/StatusBadge';
 import { useToast } from '~/shared/model/ui';
+import { ExcelConnectGuide } from './ExcelConnectGuide';
 import { TelegramConnectGuide } from './TelegramConnectGuide';
 
 export const ConnectorCard = ({
@@ -243,9 +244,9 @@ export const ConnectorCard = ({
           </div>
           {connector.id === 'web' ? (
             <p className="muted">
-              Подключать аккаунт не обязательно. Поиск — DuckDuckGo, курсы
-              BestChange — шаг «Курсы» (архив API, не HTML-страница). Сайт
-              логина этим шагом не открыть. Поля из страницы достаёт шаг LLM.
+              Поиск идёт только через Tavily: ключ в .env (TAVILY_API_KEY) или
+              в этом поле. Курсы BestChange — шаг «Курсы». Сайт логина этим
+              шагом не открыть.
             </p>
           ) : null}
           {connector.id === 'browser' ? (
@@ -262,6 +263,7 @@ export const ConnectorCard = ({
               карточке нужен, только чтобы переопределить окружение.
             </p>
           ) : null}
+          {connector.id === 'excel' ? <ExcelConnectGuide /> : null}
           {connector.id === 'telegram' ? (
             <TelegramConnectGuide
               onConnected={onRefresh}

@@ -63,9 +63,12 @@ export const fallbackParse = (
       id: 'excel',
       name: 'Excel',
       actions: [
-        { id: 'find_file', name: 'Найти файл' },
+        { id: 'find_file', name: 'Найти таблицу' },
         { id: 'read_rows', name: 'Прочитать строки' },
+        { id: 'find_rows', name: 'Найти записи' },
         { id: 'append_row', name: 'Добавить строку' },
+        { id: 'update_row', name: 'Обновить запись' },
+        { id: 'apply', name: 'Сделать в таблице' },
       ],
     },
     {
@@ -144,8 +147,8 @@ export const parsePromptToSteps = async (
 Доступные коннекторы и параметры: ${JSON.stringify(catalogJson(connectors))}.
 Верни JSON: {"name":"кратко","steps":[{"title":"...","connectorId":"...","action":"...","params":{},"iterate":false}]}.
 Параметры бери из текста пользователя. Данные между шагами: {{previous.field}}, {{item.field}}, {{input.field}}, {{steps.1.field}}.
-iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates и onec.query без iterate.
-Для курса/полей со страницы: web.fetch → llm.extract. Курсы BestChange — web.rates, не fetch. Поиск в 1С — onec.query. Переписка в почте — mail.search.`,
+iterate: true — если шаг для каждого письма или строки. transform.*, web.fetch, web.rates, excel.apply и onec.query без iterate.
+Для данных со страницы: web.search → web.fetch этой страницы → llm.generate. JS-страницы fetch откроет сам. Поиск в 1С — onec.query. Переписка в почте — mail.search. Любые правки Excel кроме одной строки / поиска / обновления по полю — excel.apply с instruction.`,
         },
         { role: 'user', content: prompt },
       ],

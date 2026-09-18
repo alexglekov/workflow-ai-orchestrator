@@ -31,6 +31,14 @@ describe('inferChatIntent', () => {
     assert.equal(inferChatIntent('добавь фильтр по сумме', true), 'plan');
   });
 
+  it('does not replan when asked to run a report now', () => {
+    assert.equal(
+      inferChatIntent('сделай мне отчет не взирая на таймер', true),
+      'ask',
+    );
+    assert.equal(inferChatIntent('пришли отчёт сейчас', true), 'ask');
+  });
+
   it('treats a question as ask', () => {
     assert.equal(
       inferChatIntent('Как работает Telegram для бизнеса?', true),

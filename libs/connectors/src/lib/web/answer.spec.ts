@@ -21,6 +21,19 @@ describe('composeSearchText', () => {
     assert.doesNotMatch(text.slice(0, 80), /From Wikipedia/);
   });
 
+  it('keeps fetched page text in the source block', () => {
+    const text = composeSearchText('usdt btc', [
+      {
+        title: 'USDT to BTC',
+        url: 'https://www.bestchange.ru/x',
+        snippet: 'монитор обменников',
+        text: '1. Exchanger A — 0.000011 BTC за 1 USDT',
+      },
+    ]);
+
+    assert.match(text, /Exchanger A/);
+  });
+
   it('falls back to snippet facts when no model answer is available', () => {
     const answer = extractiveAnswer([
       {

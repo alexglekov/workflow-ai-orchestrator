@@ -1,13 +1,40 @@
 import type { Run } from '~/entities/run';
 import { humanizeOutput } from '~/shared/lib/humanize';
-import { runStatusLabel, stepStatusLabel } from '~/shared/lib/status';
-import { ConnectorMark } from '~/shared/ui/ConnectorMark';
+import { isActiveRun, runStatusLabel } from '~/shared/lib/status';
 import { StatusBadge } from '~/shared/ui/StatusBadge';
 
 const preview = (value: unknown) => {
   const text = humanizeOutput(value);
 
   return text.length > 600 ? `${text.slice(0, 600)}…` : text;
+};
+
+const checkClass = (status: string) => {
+  if (status === 'success') {
+    return 'run-check is-ok';
+  }
+
+  if (status === 'error' || status === 'cancelled') {
+    return 'run-check is-err';
+  }
+
+  if (status === 'running' || status === 'pending') {
+    return 'run-check is-run';
+  }
+
+  return 'run-check';
+};
+
+const checkMark = (status: string) => {
+  if (status === 'success') {
+    return '✓';
+  }
+
+  if (status === 'error' || status === 'cancelled') {
+    return '!';
+  }
+
+  return '';
 };
 
 export const ChatRunCard = ({
@@ -19,13 +46,32 @@ export const ChatRunCard = ({
   onCancel?: () => void;
   onRetry?: () => void;
 }) => {
-  const active = run.status === 'running' || run.status === 'pending';
+  const stopping = Boolean(
+    run.cancelRequested &&
+      (run.status === 'running' || run.status === 'pending'),
+  );
+  const active = isActiveRun(run);
+  const head =
+    stopping
+      ? 'Останавливаю'
+      : active
+        ? 'Делаю'
+        : run.status === 'success'
+          ? 'Готово'
+          : run.status === 'cancelled'
+            ? 'Остановлено'
+            : run.status === 'error'
+              ? 'Не вышло'
+              : 'Запуск';
 
   return (
     <div className="chat-run-card">
       <div className="chat-run-head">
-        <strong>Запуск</strong>
-        <StatusBadge status={run.status} label={runStatusLabel(run.status)} />
+        <strong>{head}</strong>
+        <StatusBadge
+          status={stopping ? 'cancelled' : run.status}
+          label={runStatusLabel(run.status, run.cancelRequested)}
+        />
       </div>
       <ul className="chat-run-steps">
         {run.steps.map((step) => {
@@ -40,7 +86,9 @@ export const ChatRunCard = ({
                   : undefined
               }
             >
-              <ConnectorMark id={step.connectorId} size={36} />
+              <span className={checkClass(step.status)} aria-hidden>
+                {checkMark(step.status)}
+              </span>
               <span className="chat-run-copy">
                 <strong>{step.title}</strong>
                 {step.error ? (
@@ -49,10 +97,6 @@ export const ChatRunCard = ({
                   <small>{output}</small>
                 ) : null}
               </span>
-              <StatusBadge
-                status={step.status}
-                label={stepStatusLabel(step.status)}
-              />
             </li>
           );
         })}

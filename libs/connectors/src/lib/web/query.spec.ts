@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { describe, it } from 'node:test';
-import { buildQuery, normalizeQuery, queryTerms } from './query';
+import { buildQuery, normalizeQuery, queryTerms, shapeSearchQuery } from './query';
 
 describe('normalizeQuery', () => {
   it('collapses whitespace and drops markup noise', () => {
@@ -60,5 +60,35 @@ describe('queryTerms', () => {
 
   it('ignores the site operator', () => {
     assert.deepEqual(queryTerms('реквизиты site:nalog.gov.ru'), ['реквизиты']);
+  });
+});
+
+describe('shapeSearchQuery', () => {
+  it('drops the task wrapper and stamps a live query', () => {
+    const query = shapeSearchQuery(
+      'найди курс BTC и отправь сводку в чат',
+      { now: new Date('2026-09-18T12:00:00Z') },
+    );
+
+    assert.match(query, /курс BTC/i);
+    assert.match(query, /18 сентября 2026/);
+    assert.equal(/найди|отправь|чат/i.test(query), false);
+  });
+
+  it('does not stamp a P2P book query with the current date', () => {
+    const query = shapeSearchQuery('Bybit P2P USDT/EUR', {
+      now: new Date('2026-09-18T12:00:00Z'),
+    });
+
+    assert.equal(query, 'Bybit P2P USDT/EUR');
+  });
+
+  it('does not search the previous answer dump', () => {
+    const query = shapeSearchQuery(
+      'Top 3 Russian songs in 2026 are "Завтра".\n\nИсточники по запросу: топ песен',
+      { stamp: false },
+    );
+
+    assert.ok(query.length <= 160);
   });
 });

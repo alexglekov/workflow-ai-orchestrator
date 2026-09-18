@@ -75,6 +75,8 @@ button {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
   background: rgba(255, 255, 255, 0.82);
   border-bottom: 1px solid rgba(24, 24, 27, 0.06);
   backdrop-filter: blur(16px);
@@ -107,6 +109,8 @@ button {
 .top-nav {
   display: flex;
   gap: 4px;
+  min-width: 0;
+  flex-shrink: 1;
   background: #f3f3f6;
   padding: 3px;
   border-radius: 999px;
@@ -1143,19 +1147,37 @@ select:focus {
   align-items: center;
   justify-content: space-between;
   gap: 10px;
+  min-width: 0;
+}
+
+.prompt-toolbar .row-actions {
+  flex: 0 0 auto;
+  flex-wrap: nowrap;
+  width: auto;
 }
 
 select.agent-select {
+  appearance: none;
+  -webkit-appearance: none;
   height: 32px;
-  min-width: 112px;
-  padding: 0 28px 0 10px;
+  min-width: 108px;
+  max-width: min(180px, calc(100% - 52px));
+  flex: 1 1 auto;
+  padding: 0 28px 0 12px;
   border: 0;
   box-shadow: none;
   border-radius: 999px;
   font-size: 12.5px;
   font-weight: 650;
   color: var(--ink);
-  background: #f2f2f5;
+  background-color: #f2f2f5;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%233f3f46' stroke-width='2.4' stroke-linecap='round' stroke-linejoin='round'><path d='m6 9 6 6 6-6'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+  background-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 select.agent-select:focus {
@@ -1438,6 +1460,35 @@ select.agent-select:focus {
   color: var(--err);
 }
 
+.run-check {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 1.5px solid #d0d0d6;
+  display: grid;
+  place-items: center;
+  flex-shrink: 0;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  margin-top: 1px;
+}
+
+.run-check.is-ok {
+  background: #16a34a;
+  border-color: #16a34a;
+}
+
+.run-check.is-err {
+  background: var(--err);
+  border-color: var(--err);
+}
+
+.run-check.is-run {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 22%, transparent);
+}
+
 .telegram-guide,
 .telegram-guide-sheet {
   display: flex;
@@ -1510,6 +1561,10 @@ select.agent-select:focus {
   grid-template-columns: 64px 1fr;
   gap: 8px;
   align-items: start;
+}
+
+.telegram-guide code {
+  font-size: 0.9em;
 }
 
 .telegram-guide-mark {
@@ -1695,6 +1750,7 @@ select.agent-select:focus {
 .send-btn {
   width: 36px;
   height: 36px;
+  flex-shrink: 0;
   border: 0;
   border-radius: 50%;
   background: linear-gradient(135deg, #ff7a59, #ff2e92 55%, #7c5cff);
@@ -2577,11 +2633,9 @@ button.chevron:hover {
   flex-shrink: 0;
   position: sticky;
   bottom: 0;
-}
-
-.composer-dock .prompt-toolbar .row-actions {
   width: 100%;
-  justify-content: flex-end;
+  min-width: 0;
+  max-width: 100%;
 }
 
 .list-shell {
@@ -2978,11 +3032,11 @@ button.chevron:hover {
   .topbar {
     padding-left: 12px;
     padding-right: 12px;
-    gap: 10px;
+    gap: 8px;
   }
 
   .top-nav a {
-    padding: 8px 12px;
+    padding: 8px 10px;
     min-height: 36px;
     display: inline-flex;
     align-items: center;
@@ -3175,16 +3229,16 @@ button.chevron:hover {
     min-height: 72px;
   }
 
-  .prompt-toolbar .row-actions {
-    flex-wrap: wrap;
+  .prompt-toolbar {
     gap: 8px;
   }
 
   select.agent-select {
-    min-width: 0;
-    flex: 1;
-    height: 36px;
-    font-size: 14px;
+    min-width: 112px;
+    max-width: none;
+    height: 40px;
+    padding-right: 30px;
+    font-size: 16px;
   }
 
   .node-picker {
@@ -3246,6 +3300,12 @@ button.chevron:hover {
     height: 1px;
     overflow: hidden;
     clip: rect(0 0 0 0);
+  }
+
+  .top-nav a {
+    padding: 6px 8px;
+    min-height: 32px;
+    font-size: 12px;
   }
 
   .play-label {

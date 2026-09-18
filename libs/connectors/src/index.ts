@@ -50,6 +50,9 @@ export {
   withTelegramConnectCta,
   isLaunchIntent,
   isStopIntent,
+  isLiveTrigger,
+  isRunNowIntent,
+  isDoItTask,
 } from './lib/chat-cta';
 export {
   EVENT_STEP_TRIGGERS,
@@ -61,3 +64,29 @@ export { completeLlm } from './lib/llm/complete';
 export type { LlmCompleteOptions, LlmMessage, LlmProviderId } from './lib/llm/complete';
 export { resolveLlm } from './lib/llm/resolve';
 export type { ResolvedLlm } from './lib/llm/resolve';
+export {
+  normalizeQuery,
+  searchFreshness,
+  shapeSearchQuery,
+  wantsFreshSearch,
+} from './lib/web/query';
+export {
+  namedSite,
+  pickResultUrl,
+  wantsPageVisit,
+  p2pPageUrl,
+  p2pSearchQuery,
+  p2pTarget,
+  bestchangePageUrl,
+  exchangePair,
+} from './lib/web/site';
+export type { P2pBrand, P2pTarget } from './lib/web/site';
+export { fetchP2pBook } from './lib/web/p2p';
+export type { P2pBook, P2pOffer } from './lib/web/p2p';
+export { buildUnlockRequest, unlockerConfig, unlockPage } from './lib/web/unlocker';
+export type {
+  UnlockedPage,
+  UnlockerConfig,
+  UnlockerProvider,
+  UnlockRequest,
+} from './lib/web/unlocker';

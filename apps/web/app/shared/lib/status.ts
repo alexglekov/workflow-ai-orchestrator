@@ -10,7 +10,11 @@ export const connectionStatusLabel = (status: string) => {
   return 'не подключено';
 };
 
-export const runStatusLabel = (status: string) => {
+export const runStatusLabel = (status: string, cancelRequested = false) => {
+  if (cancelRequested && (status === 'running' || status === 'pending')) {
+    return 'остановка';
+  }
+
   if (status === 'running') {
     return 'выполняется';
   }
@@ -29,6 +33,13 @@ export const runStatusLabel = (status: string) => {
 
   return 'в очереди';
 };
+
+export const isActiveRun = (run: {
+  status: string;
+  cancelRequested?: boolean;
+}) =>
+  !run.cancelRequested &&
+  (run.status === 'pending' || run.status === 'running');
 
 export const stepStatusLabel = (status: string) => {
   if (status === 'running') {

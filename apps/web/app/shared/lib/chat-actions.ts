@@ -168,6 +168,80 @@ export const isLaunchIntent = (text: string) => {
   );
 };
 
+export const isDoItTask = (text: string) => {
+  const value = text.trim();
+
+  if (!value || isStopIntent(value) || isLaunchIntent(value)) {
+    return false;
+  }
+
+  if (
+    /(добавь|убери|удали|поменяй|замени|измени)\s+(шаг|фильтр|триггер|подключен)/i.test(
+      value,
+    )
+  ) {
+    return false;
+  }
+
+  if (
+    /(?:сделай|создай|собери)\s+(?:мне\s+)?(?:бота|сценари|workflow|цепочк)/i.test(
+      value,
+    ) &&
+    !/(отч[её]т|найд|пришл|отправ)/i.test(value)
+  ) {
+    return false;
+  }
+
+  return /(найд|поищ|пришл|отправ|сообщ|собери|сделай|узнай|прогон|сравни|подбер|проверь|разбер)/i.test(
+    value,
+  );
+};
+
+export const isRunNowIntent = (text: string, hasSteps = false) => {
+  const value = text.trim().toLowerCase();
+
+  if (!value || isStopIntent(value)) {
+    return false;
+  }
+
+  if (
+    /(?:сделай|создай|собери)\s+(?:мне\s+)?(?:бота|сценари|workflow|цепочк)/i.test(
+      value,
+    ) &&
+    !/отч[её]т/.test(value)
+  ) {
+    return false;
+  }
+
+  const ignoreTimer =
+    /не\s*взирая|невзирая|не\s*смотря\s+на|не\s*дожида?|не\s*жди|не\s*ждать|прямо\s+сейчас|немедленн|вне\s+(?:очереди|расписан)|разово(?:\s|$)|не\s+по\s+таймеру/i.test(
+      value,
+    ) ||
+    (/сейчас/i.test(value) &&
+      /(сделай|собери|пришли|отправь|скинь|прогони|запусти|выполн|отч[её]т)/i.test(
+        value,
+      ));
+  const wantsOutput =
+    /(сделай|собери|пришли|отправь|скинь|подготовь|прогони|запусти|выполн)/i.test(
+      value,
+    ) || /отч[её]т|результат|сводк/.test(value);
+
+  if (ignoreTimer && wantsOutput) {
+    return true;
+  }
+
+  const asksReport =
+    /(сделай|собери|пришли|отправь|скинь|подготовь)\s+(?:мне\s+)?(?:этот\s+|текущий\s+)?(?:отч[её]т|результат|сводк)/i.test(
+      value,
+    );
+  const setsSchedule =
+    /кажд(?:ый|ую|ое|ые)|ежечас|по\s+расписанию|утром\s+в|каждые\s+\d/i.test(
+      value,
+    );
+
+  return hasSteps && asksReport && !setsSchedule;
+};
+
 export const connectIntentId = (text: string): string | null => {
   const value = text.trim().toLowerCase();
 
@@ -179,7 +253,12 @@ export const connectIntentId = (text: string): string | null => {
     return 'mail';
   }
 
-  if (/excel|таблиц|яндекс.?диск|google.?drive/.test(value) && /подключ/.test(value)) {
+  if (
+    /excel|таблиц|яндекс.?диск|яндекс.?таблиц|google.?drive|google.?sheets/.test(
+      value,
+    ) &&
+    /подключ/.test(value)
+  ) {
     return 'excel';
   }
 
@@ -200,7 +279,7 @@ export const connectorTitle = (id: string, name?: string) => {
   }
 
   if (id === 'excel') {
-    return 'Excel';
+    return 'Excel / Яндекс Таблицы';
   }
 
   if (id === 'onec') {

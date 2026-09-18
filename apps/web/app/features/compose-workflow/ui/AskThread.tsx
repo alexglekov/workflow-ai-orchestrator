@@ -174,10 +174,6 @@ export const AskThread = ({
     }
   }, [empty, messages.length, hasMore, loadingMore, onLoadOlder]);
 
-  if (empty) {
-    return null;
-  }
-
   return (
     <div className="ask-thread" ref={scroller} onScroll={noteBottom}>
       {hasMore ? (

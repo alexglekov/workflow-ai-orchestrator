@@ -53,6 +53,8 @@ import {
   connectedStatusMessage,
   connectorTitle,
   isLaunchIntent,
+  isDoItTask,
+  isRunNowIntent,
   isStopIntent,
   LAUNCH_MARK,
   launchedStatusMessage,
@@ -60,9 +62,12 @@ import {
   runMark,
   STATUS_LAUNCHED_MARK,
   stoppedStatusMessage,
+  stripChatMarks,
   unresolvedConnectorIds,
 } from '~/shared/lib/chat-actions';
-import { isEventTrigger } from '~/shared/lib/event-steps';
+import { runReplyText } from '~/shared/lib/humanize';
+import { isEventTrigger, isLiveTrigger } from '~/shared/lib/event-steps';
+import { isActiveRun } from '~/shared/lib/status';
 import { errorAtom, loadingAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
 import { Icon } from '~/shared/ui/Icon';
@@ -154,10 +159,17 @@ export const WorkflowEditorPage = () => {
   const promptRef = useRef(prompt);
   const workflowRef = useRef(workflow);
   const sessionBindings = useRef<Record<string, string>>({});
+  const postedRunReplies = useRef(new Set<string>());
+  const seenLiveRuns = useRef(new Set<string>());
+  const buildMessagesRef = useRef(buildMessages);
+  const postAssistantRef = useRef<
+    ((thread: 'ask' | 'build', content: string) => Promise<void>) | null
+  >(null);
 
   nameRef.current = name;
   promptRef.current = prompt;
   workflowRef.current = workflow;
+  buildMessagesRef.current = buildMessages;
 
   useEffect(() => {
     void fetchAgents()
@@ -276,6 +288,7 @@ export const WorkflowEditorPage = () => {
 
             if (run.status === 'pending' || run.status === 'running') {
               again = true;
+              seenLiveRuns.current.add(runId);
             }
           } catch {
             return;
@@ -287,7 +300,64 @@ export const WorkflowEditorPage = () => {
         return;
       }
 
-      setRuns((current) => ({ ...current, ...next }));
+      setRuns((current) => {
+        const merged = { ...current };
+
+        for (const [id, fetched] of Object.entries(next)) {
+          const prev = current[id];
+
+          if (
+            prev?.cancelRequested &&
+            (fetched.status === 'pending' || fetched.status === 'running') &&
+            !fetched.cancelRequested
+          ) {
+            merged[id] = { ...fetched, cancelRequested: true };
+          } else {
+            merged[id] = fetched;
+          }
+        }
+
+        return merged;
+      });
+
+      for (const run of Object.values(next)) {
+        if (run.status !== 'success' || run.cancelRequested) {
+          continue;
+        }
+
+        if (run.source && !['manual', 'retry'].includes(run.source)) {
+          continue;
+        }
+
+        const reply = runReplyText(run.steps);
+
+        if (!reply || postedRunReplies.current.has(run.id)) {
+          continue;
+        }
+
+        const already = buildMessagesRef.current.some(
+          (item) =>
+            item.role === 'assistant' &&
+            stripChatMarks(item.content).trim() === reply,
+        );
+
+        if (already) {
+          postedRunReplies.current.add(run.id);
+          continue;
+        }
+
+        const finished = run.finishedAt
+          ? Date.now() - new Date(run.finishedAt).getTime()
+          : Number.POSITIVE_INFINITY;
+        const fresh = finished < 90_000;
+
+        if (!seenLiveRuns.current.has(run.id) && !fresh) {
+          continue;
+        }
+
+        postedRunReplies.current.add(run.id);
+        void postAssistantRef.current?.('build', reply);
+      }
 
       if (again) {
         timer = window.setTimeout(() => void tick(), 1200);
@@ -512,6 +582,8 @@ export const WorkflowEditorPage = () => {
     }).catch(() => undefined);
   };
 
+  postAssistantRef.current = postAssistant;
+
   const applySettle = (
     thread: 'ask' | 'build',
     match: string,
@@ -643,17 +715,101 @@ export const WorkflowEditorPage = () => {
     }
   };
 
+  const runOnceFromChat = async (
+    note = 'Беру на себя.',
+    boundConnections = connections,
+  ) => {
+    if (!id || launching || stopping) {
+      return;
+    }
+
+    const current = workflowRef.current ?? workflow;
+    const missing = unresolvedConnectorIds(current.steps, boundConnections);
+
+    setMode('build');
+    setMobileTab('chat');
+
+    if (missing.length) {
+      await postAssistant(
+        'build',
+        `Сначала выберите или создайте подключения в чате.\n${missing.map(connectMark).join('\n')}`,
+      );
+      return;
+    }
+
+    if (!current.steps.length) {
+      await postAssistant(
+        'build',
+        'Сначала опишите задачу — соберу шаги и сразу сделаю.',
+      );
+      return;
+    }
+
+    setLaunching(true);
+
+    try {
+      await persist(current.steps);
+      const created = await startRun(id, {});
+
+      setRuns((currentRuns) => ({ ...currentRuns, [created.id]: created }));
+      await postAssistant('build', `${note}\n${runMark(created.id)}`);
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Не удалось запустить');
+    } finally {
+      setLaunching(false);
+    }
+  };
+
   const stopBot = async () => {
     if (!id || stopping || launching) {
       return;
     }
 
     setStopping(true);
+    setTriggers((current) =>
+      current.map((item) =>
+        item.enabled &&
+        (item.type === 'schedule' || isEventTrigger(item.type))
+          ? { ...item, enabled: false }
+          : item,
+      ),
+    );
+    setWorkflow((current) =>
+      current
+        ? {
+            ...current,
+            triggers: (current.triggers ?? []).map((item) =>
+              item.enabled &&
+              (item.type === 'schedule' || isEventTrigger(item.type))
+                ? { ...item, enabled: false }
+                : item,
+            ),
+          }
+        : current,
+    );
+    setRuns((current) => {
+      const next = { ...current };
+
+      for (const [runId, run] of Object.entries(next)) {
+        if (run.status === 'pending' || run.status === 'running') {
+          next[runId] = {
+            ...run,
+            cancelRequested: true,
+            status: run.status === 'pending' ? 'cancelled' : run.status,
+          };
+        }
+      }
+
+      return next;
+    });
+    applySettle('build', LAUNCH_MARK, {});
+    applySettle('build', STATUS_LAUNCHED_MARK, {
+      content: stoppedStatusMessage(),
+    });
 
     try {
-      const active = Object.values(runs).filter(
-        (item) => item.status === 'pending' || item.status === 'running',
-      );
+      const active = Object.values(runs).filter((item) => isActiveRun(item));
 
       await stopWorkflowLive(id);
 
@@ -665,7 +821,10 @@ export const WorkflowEditorPage = () => {
         const next = { ...current };
 
         for (const item of cancelled) {
-          next[item.id] = item;
+          next[item.id] = {
+            ...item,
+            cancelRequested: true,
+          };
         }
 
         return next;
@@ -675,12 +834,20 @@ export const WorkflowEditorPage = () => {
 
       if (nextTriggers) {
         setTriggers(nextTriggers);
+        setWorkflow((current) =>
+          current ? { ...current, triggers: nextTriggers } : current,
+        );
       }
 
-      await settleThread('build', LAUNCH_MARK, {});
-      await settleThread('build', STATUS_LAUNCHED_MARK, {
+      await settleWorkflowChat(id, {
+        thread: 'build',
+        match: LAUNCH_MARK,
+      }).catch(() => undefined);
+      await settleWorkflowChat(id, {
+        thread: 'build',
+        match: STATUS_LAUNCHED_MARK,
         content: stoppedStatusMessage(),
-      });
+      }).catch(() => undefined);
       await postAssistant(
         'build',
         `Можно запустить снова.\n${LAUNCH_MARK}`,
@@ -688,6 +855,12 @@ export const WorkflowEditorPage = () => {
       setError(null);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Не удалось остановить');
+
+      const nextTriggers = await fetchTriggers(id).catch(() => null);
+
+      if (nextTriggers) {
+        setTriggers(nextTriggers);
+      }
     } finally {
       setStopping(false);
     }
@@ -697,7 +870,7 @@ export const WorkflowEditorPage = () => {
     const thread: 'ask' | 'build' = mode === 'ask' ? 'ask' : 'build';
     const followUp = thread === 'build' && buildMessages.length > 0;
     const message = (
-      thread === 'ask' ? askDraft : followUp ? planDraft : prompt
+      thread === 'ask' ? askDraft : followUp ? planDraft : promptRef.current
     ).trim();
 
     if (!message || (thread === 'ask' ? asking : planning) || !id) {
@@ -742,9 +915,7 @@ export const WorkflowEditorPage = () => {
       }).catch(() => undefined);
 
       const live = liveTriggersOf(triggers);
-      const active = Object.values(runs).filter(
-        (item) => item.status === 'pending' || item.status === 'running',
-      );
+      const active = Object.values(runs).filter((item) => isActiveRun(item));
 
       if (!live.length && !active.length) {
         await postAssistant('build', 'Бот уже остановлен.');
@@ -752,6 +923,30 @@ export const WorkflowEditorPage = () => {
       }
 
       await stopBot();
+      return;
+    }
+
+    if (isRunNowIntent(message, (workflowRef.current ?? workflow).steps.length > 0)) {
+      setMode('build');
+      setMobileTab('chat');
+
+      if (thread === 'ask') {
+        setAskDraft('');
+      } else {
+        setPlanDraft('');
+      }
+
+      setBuildMessages((current) => [
+        ...(thread === 'build' ? history : current),
+        { role: 'user', content: message },
+      ]);
+
+      await appendWorkflowChat(id, {
+        thread: 'build',
+        messages: [{ role: 'user', content: message }],
+      }).catch(() => undefined);
+
+      await runOnceFromChat('Запускаю сейчас, не жду расписание.');
       return;
     }
 
@@ -797,14 +992,14 @@ export const WorkflowEditorPage = () => {
     }
 
     const followUp = buildMessages.length > 0;
-    const message = (followUp ? planDraft : prompt).trim();
+    const message = (followUp ? planDraft : promptRef.current).trim();
 
     if (!message) {
       return;
     }
 
     const history = buildMessages;
-    const task = followUp ? prompt : message;
+    const task = followUp ? promptRef.current : message;
 
     setPlanDraft('');
     setBuildMessages([...history, { role: 'user', content: message }]);
@@ -855,6 +1050,22 @@ export const WorkflowEditorPage = () => {
         ) {
           replaceSteps(nextSteps, true);
         }
+      }
+
+      const parsed = parseChatActions(result.message);
+      const readySteps = workflowRef.current?.steps ?? result.workflow?.steps ?? [];
+      const boundReady =
+        readySteps.length > 0 &&
+        unresolvedConnectorIds(readySteps, nextConnections ?? connections)
+          .length === 0;
+
+      if (
+        isDoItTask(message) &&
+        boundReady &&
+        !parsed.runId &&
+        !parsed.launch
+      ) {
+        await runOnceFromChat();
       }
 
       const nextTriggers = await fetchTriggers(id).catch(() => null);
@@ -1094,9 +1305,7 @@ export const WorkflowEditorPage = () => {
     unresolvedConnectorIds(workflow.steps, connections).length === 0;
   const eventLive =
     connectorsReady && eventTriggers.some((item) => item.enabled);
-  const runLive = Object.values(runs).some(
-    (item) => item.status === 'pending' || item.status === 'running',
-  );
+  const runLive = Object.values(runs).some((item) => isActiveRun(item));
   const scheduleLive = triggers.some(
     (item) => item.type === 'schedule' && item.enabled,
   );
@@ -1165,20 +1374,26 @@ export const WorkflowEditorPage = () => {
           >
             <Icon name="clock" size={16} />
           </button>
-          {botLive ? (
+          {botLive || stopping ? (
             <span
               className="chrome-live"
               title={
-                eventLive
-                  ? 'Бот слушает входящие сообщения'
-                  : 'Сценарий выполняется'
+                stopping
+                  ? 'Останавливаю сценарий'
+                  : eventLive
+                    ? 'Бот слушает входящие сообщения'
+                    : 'Сценарий выполняется'
               }
             >
               <span className="live-dot" />
-              {eventLive ? 'Бот работает' : 'Идёт запуск'}
+              {stopping
+                ? 'Останавливаю'
+                : eventLive
+                  ? 'Бот работает'
+                  : 'Идёт запуск'}
             </span>
           ) : null}
-          {botLive ? (
+          {botLive || stopping ? (
             <button
               type="button"
               className="play-btn labeled is-stop"
@@ -1267,7 +1482,7 @@ export const WorkflowEditorPage = () => {
                 (mode === 'ask' ? asking : planning) || launching || stopping
               }
               loadingLabel={
-                stopping ? 'Останавливаю…' : launching ? 'Запускаю…' : 'Думаю…'
+                stopping ? 'Останавливаю…' : launching ? 'Делаю…' : 'Думаю…'
               }
               hasMore={mode === 'ask' ? askHasMore : buildHasMore}
               loadingMore={mode === 'ask' ? askLoadingMore : buildLoadingMore}
@@ -1295,6 +1510,7 @@ export const WorkflowEditorPage = () => {
                 );
 
                 replaceSteps(nextSteps, true);
+                await persist(nextSteps);
 
                 const next = await fetchConnections();
 
@@ -1334,10 +1550,23 @@ export const WorkflowEditorPage = () => {
                 }
 
                 const missing = unresolvedConnectorIds(nextSteps, next);
+                const lastUser = [...(mode === 'ask' ? askMessages : buildMessages)]
+                  .reverse()
+                  .find((item) => item.role === 'user');
                 const liveAfterBind =
                   !missing.length &&
                   nextSteps.length > 0 &&
-                  eventTriggersOf(triggers).some((item) => item.enabled);
+                  triggers.some(isLiveTrigger);
+
+                if (
+                  !missing.length &&
+                  nextSteps.length &&
+                  lastUser &&
+                  isDoItTask(lastUser.content)
+                ) {
+                  await runOnceFromChat('Беру на себя.', next);
+                  return;
+                }
 
                 if (liveAfterBind) {
                   await settleThread('build', LAUNCH_MARK, {
@@ -1412,7 +1641,7 @@ export const WorkflowEditorPage = () => {
               placeholder={
                 buildFollowUp
                   ? 'Спросите или измените сценарий'
-                  : undefined
+                  : 'Напишите задачу — сделаю сам'
               }
             />
           </div>

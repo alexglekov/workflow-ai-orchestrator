@@ -109,20 +109,22 @@ API: [http://localhost:3000/api](http://localhost:3000/api)
 
 Без опубликованного endpoint шаг 1С завершится ошибкой — это ожидаемо. Объект, которого нет в публикации OData, даёт 404.
 
-### Excel (ссылка / Google Drive / Яндекс Диск)
+### Excel (Яндекс Таблицы / Яндекс Диск / Google Drive)
 
-Локальные файлы не используются. На странице **Коннекторы** можно:
+Локальные файлы не используются. На странице **Коннекторы** или в чате можно:
 
-- вставить **прямую ссылку** на документ (Google Таблица, публичный файл Яндекс Диска или `.xlsx`);
-- или подключить **Яндекс Диск / Google Drive** по OAuth и искать файл по имени.
+- вставить **ссылку** на Яндекс Таблицу или файл (`disk.yandex.ru`, `docs.yandex.ru`, `yadi.sk`, Google Таблица, `.xlsx`);
+- или подключить **Яндекс Диск / Google Drive** по OAuth и искать таблицу по имени.
 
 Шаги workflow:
 
-- `excel.find_file` — открыть по `fileUrl` или найти `.xlsx` по названию
+- `excel.find_file` — открыть по `fileUrl` или найти на Диске; без имени вернёт список таблиц
 - `excel.read_rows` — строки как объекты `{ "Заголовок": значение }` (до 5000)
-- `excel.append_row` — дописать строку
+- `excel.find_rows` — найти строки по заголовку колонки (`field` / `op` / `value`)
+- `excel.append_row` — дописать строку в **реальные колонки листа**, не в фиксированные Name/Phone
+- `excel.update_row` — найти запись и обновить ячейки из `row`
 
-Запись по публичной ссылке возможна, только если Диск подключён токеном. Чтение по открытой ссылке работает без токена.
+Запись по публичной ссылке возможна, только если Диск подключён токеном. Чтение по открытой ссылке работает без токена. В чате токен не спрашивается — только кнопка подключения.
 
 ### LLM (извлечение и текст)
 
@@ -150,19 +152,17 @@ Qwen TTS отдаёт WAV, а Telegram принимает голосовые т�
 
 Для публичных справок: ИНН, открытые сайты. Числа со страницы достаёт `llm.extract`. CRM — 1С:CRM. Курсы BestChange — не HTML.
 
-- `web.search` — поиск с перебором провайдеров. Параметры: `query`, `limit`, `site`, `lang`, `region`, `freshness` (`day`/`week`/`month`/`year`), `fetchContent`, `contentLimit`, `provider`
-- `web.fetch` — скачать URL и вернуть текст и таблицы (`full: true` — вместе с меню и подвалом)
+- `web.search` — поиск через **Tavily** (индекс: ссылки и сниппеты). Параметры: `query`, `limit`, `site`, `lang`, `region`, `freshness` (`day`/`week`/`month`/`year`). Нужен `TAVILY_API_KEY`.
+- `web.fetch` — снять текст выбранной страницы: сначала Tavily Extract, если оболочка пустая — HTML, затем Chromium. `url` или первый результат search (`full: true` — вместе с меню и подвалом)
 - `web.rates` — BTC/LTC/USDT → RUB из `api.bestchange.ru/info.zip` (поля `btcRub`, `ltcRub`, `usdtRub` и готовый `text`)
 
-**Порядок источников:** сначала ключи (`BRAVE_API_KEY`, `GOOGLE_SEARCH_API_KEY` + `cx`, `SERPER_API_KEY`, `TAVILY_API_KEY`), затем Qwen (`enable_search`) по ключу из `QWEN_API_KEY`, затем бесплатные: DuckDuckGo Lite, Bing, Chromium, Brave, DuckDuckGo HTML, Mojeek и Wikipedia в самом конце. Ключи не обязательны, но с серверного IP бесплатные источники чаще режет анти-бот. Отключить поиск модели: в коннекторе Web `allowLlmSearch=false` или `provider: duckduckgo-lite`.
+Другие поисковики (Brave, Bing, DuckDuckGo, Chromium) для `web.search` не используются. Индексатор только находит страницы; содержимое снимает `web.fetch`.
 
-Выдача каждого источника сверяется с запросом: Bing и Brave умеют отвечать `200 OK` с результатами по чужому запросу, такой ответ считается отказом и поиск идёт дальше. Одинаковые запросы кэшируются на 5 минут, чтобы не упираться в лимиты.
+`web.search` возвращает `results[]` (`title`, `url`, `host`, `snippet`, `score`, `text`), `answer` и готовый `text` для следующих шагов. Выдача дедуплицируется. Одинаковые запросы кэшируются на 5 минут.
 
-`web.search` возвращает `results[]` (`title`, `url`, `host`, `snippet`, `score`, `text`), `attempts[]` с причиной отказа каждого провайдера и готовый `text` для `llm.extract`. Выдача дедуплицируется, реклама и трекинг-параметры отбрасываются, один домен не занимает больше двух мест. По умолчанию догружается текст первых трёх страниц — `fetchContent: false` отключает. Если сработал только резерв, в ответе будет `degraded: true` и `warning`.
+Приватные адреса и localhost закрыты. Instagram и личные кабинеты этим шагом не открыть.
 
-Подключение необязательно, но без ключа поиск деградирует. Приватные адреса и localhost закрыты. Instagram и личные кабинеты этим шагом не открыть.
-
-Пример курса: `web.rates` → `telegram.send_message`. Пример справки: `web.fetch` → `llm.extract` → `telegram.send_message`.
+Пример курса: `web.rates` → `telegram.send_message`. Пример справки: `web.search` → `web.fetch` → `llm.generate` → `telegram.send_message`.
 
 ### Browser (Playwright)
 

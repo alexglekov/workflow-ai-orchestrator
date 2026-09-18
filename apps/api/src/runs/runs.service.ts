@@ -201,14 +201,17 @@ export class RunsService {
         },
       });
 
+      const latest = await this.runs.findById(runId);
+      const finalStatus = latest?.cancelRequested ? 'cancelled' : status;
+
       await this.runs.update(runId, {
-        status,
+        status: finalStatus,
         finishedAt: new Date(),
         lockedAt: null,
         lockedBy: null,
       });
 
-      if (status === 'error') {
+      if (finalStatus === 'error') {
         await this.notifyFailure(workflow.name, runId, run.source);
       }
     } catch (error) {

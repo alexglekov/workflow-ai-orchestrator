@@ -14,6 +14,7 @@ import {
   type Workflow,
 } from '~/entities/workflow';
 import { CreateWorkflowButton } from '~/features/create-workflow';
+import { isLiveTrigger, isPipelineTrigger } from '~/shared/lib/event-steps';
 import { errorAtom } from '~/shared/model/ui';
 import { Banner } from '~/shared/ui/Banner';
 import { Icon } from '~/shared/ui/Icon';
@@ -23,7 +24,11 @@ const PAGE_SIZE = 8;
 const workflowTriggers = (workflow: Workflow): WorkflowTrigger[] =>
   workflow.triggers ?? [];
 
-const isLive = (workflow: Workflow) => workflowTriggers(workflow).length > 0;
+const isLive = (workflow: Workflow) =>
+  workflowTriggers(workflow).some(isLiveTrigger);
+
+const isPipeline = (workflow: Workflow) =>
+  workflowTriggers(workflow).some(isPipelineTrigger);
 
 const preview = (name: string, prompt: string, empty: boolean) => {
   const text = prompt.trim();
@@ -65,7 +70,8 @@ const WorkflowRow = ({
 }) => {
   const empty = workflow.steps.length === 0;
   const triggers = workflowTriggers(workflow);
-  const subtitle = live
+  const pipeline = triggers.some(isPipelineTrigger);
+  const subtitle = pipeline
     ? lastFiredLabel(triggers)
     : preview(workflow.name, workflow.prompt, empty);
 
@@ -82,7 +88,7 @@ const WorkflowRow = ({
         </span>
         <span className="workflow-card-body">
           <strong>{workflow.name}</strong>
-          {live ? (
+          {triggers.length ? (
             <span className="launch-chips">
               {triggers.map((trigger) => (
                 <span
@@ -136,8 +142,8 @@ export const WorkflowsPage = () => {
     })();
   }, [setError, setWorkflows]);
 
-  const live = workflows.filter(isLive);
-  const drafts = workflows.filter((item) => !isLive(item));
+  const pipelines = workflows.filter(isPipeline);
+  const drafts = workflows.filter((item) => !isPipeline(item));
   const pages = Math.max(1, Math.ceil(drafts.length / PAGE_SIZE));
   const safePage = Math.min(page, pages - 1);
   const visibleDrafts = drafts.slice(
@@ -153,7 +159,7 @@ export const WorkflowsPage = () => {
       await deleteWorkflow(id);
       const next = workflows.filter((item) => item.id !== id);
       setWorkflows(next);
-      const nextDrafts = next.filter((item) => !isLive(item));
+      const nextDrafts = next.filter((item) => !isPipeline(item));
       const nextPages = Math.max(1, Math.ceil(nextDrafts.length / PAGE_SIZE));
       setPage((current) => Math.min(current, nextPages - 1));
     } catch (err) {
@@ -207,18 +213,18 @@ export const WorkflowsPage = () => {
               </p>
             </div>
           </div>
-          {live.length === 0 ? (
+          {pipelines.length === 0 ? (
             <p className="muted">
               Пока нет. События появятся из шагов чата, расписание — с кнопки.
             </p>
           ) : (
             <ul className="workflow-list">
-              {live.map((workflow) => (
+              {pipelines.map((workflow) => (
                 <WorkflowRow
                   key={workflow.id}
                   workflow={workflow}
                   busy={busy}
-                  live
+                  live={isLive(workflow)}
                   onRemove={(id) => void removeOne(id)}
                 />
               ))}

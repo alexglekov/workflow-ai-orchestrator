@@ -36,7 +36,7 @@ export const PromptForm = ({
         }}
         placeholder={
           placeholder ||
-          'Спросите что угодно или опишите задачу: бот, почта, Excel, Telegram'
+          'Напишите задачу — сделаю сам: найти, сравнить, прислать в Telegram'
         }
       />
       <div className="prompt-toolbar">

@@ -3,7 +3,10 @@ import { describe, it } from 'node:test';
 import {
   decodeEntities,
   extractTables,
+  isThinPage,
+  looksLikeSpaShell,
   metaDescription,
+  needsRender,
   readableText,
   stripHtml,
 } from './html';
@@ -83,5 +86,50 @@ describe('extractTables', () => {
         ['USDT', '95,5'],
       ],
     ]);
+  });
+});
+
+describe('isThinPage', () => {
+  it('treats an empty JS shell as thin', () => {
+    assert.equal(isThinPage('Enable JavaScript to continue'), true);
+    assert.equal(isThinPage(`${'Курс обменника '.repeat(25)} резерв 12 BTC`), false);
+  });
+});
+
+describe('looksLikeSpaShell', () => {
+  it('detects a React/Next shell with heavy scripts and little text', () => {
+    const html = `<div id="root"></div><script>${'a'.repeat(9000)}</script>`;
+
+    assert.equal(looksLikeSpaShell(html, 'Загрузка...'), true);
+  });
+
+  it('ignores plain server-rendered pages', () => {
+    const html = '<main><p>Обычная статья без фреймворков</p></main>';
+    const text = 'Обычная статья без фреймворков '.repeat(20);
+
+    assert.equal(looksLikeSpaShell(html, text), false);
+  });
+
+  it('ignores an SPA that already rendered its content', () => {
+    const html = '<div id="app"></div><script>x()</script>';
+    const text = 'Готовый контент приложения. '.repeat(60);
+
+    assert.equal(looksLikeSpaShell(html, text), false);
+  });
+});
+
+describe('needsRender', () => {
+  it('renders thin pages and unrendered SPA shells', () => {
+    assert.equal(needsRender('<div id="root"></div>', 'Loading'), true);
+    assert.equal(
+      needsRender(`<div id="root"></div><script>${'z'.repeat(9000)}</script>`, 'Загрузка'),
+      true,
+    );
+  });
+
+  it('keeps rich static pages as is', () => {
+    const text = 'Полноценный текст страницы. '.repeat(40);
+
+    assert.equal(needsRender('<main><p>...</p></main>', text), false);
   });
 });

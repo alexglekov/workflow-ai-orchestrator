@@ -3,6 +3,18 @@ export type EventTriggerType = 'telegram' | 'mail';
 export const isEventTrigger = (type: string): type is EventTriggerType =>
   type === 'telegram' || type === 'mail';
 
+export const isLiveTrigger = (trigger: {
+  type: string;
+  enabled?: boolean;
+}): boolean =>
+  Boolean(trigger.enabled) &&
+  (trigger.type === 'schedule' || isEventTrigger(trigger.type));
+
+export const isPipelineTrigger = (trigger: { type: string }): boolean =>
+  trigger.type === 'schedule' ||
+  isEventTrigger(trigger.type) ||
+  trigger.type === 'webhook';
+
 export const eventTriggerTypesFromSteps = (
   steps: Array<{ connectorId: string; action: string }>,
 ): EventTriggerType[] => {

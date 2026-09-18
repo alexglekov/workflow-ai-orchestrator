@@ -1,4 +1,4 @@
-import { chromium, type Browser, type Page } from 'playwright';
+import { type Browser, type Page } from 'playwright';
 import {
   Connector,
   ConnectorExecuteInput,
@@ -7,6 +7,12 @@ import {
 import { firstNonEmpty, interpolate } from '../interpolate';
 import { assertPublicHttpUrl } from '../web/ssrf';
 import { stripHtml } from '../web/html';
+import {
+  CHROME_UA,
+  gotoPage,
+  launchChromium,
+  parseWaitUntil,
+} from './chromium';
 
 type BrowserAction = {
   type?: string;
@@ -27,13 +33,6 @@ const asActions = (value: unknown): BrowserAction[] => {
       : { type: 'wait', ms: 0 },
   );
 };
-
-const launch = async (): Promise<Browser> =>
-  chromium.launch({
-    headless: true,
-    executablePath: process.env['PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH'] || undefined,
-    args: ['--disable-dev-shm-usage', '--no-sandbox'],
-  });
 
 const applyActions = async (page: Page, actions: BrowserAction[]) => {
   for (const action of actions) {
@@ -89,20 +88,26 @@ const openPage = async (
   let browser: Browser | undefined;
 
   try {
-    browser = await launch();
-    const context = await browser.newContext(
-      credentials['storageState']
+    browser = await launchChromium();
+    const context = await browser.newContext({
+      userAgent: CHROME_UA,
+      locale: 'ru-RU',
+      viewport: { width: 1280, height: 900 },
+      ignoreHTTPSErrors: true,
+      extraHTTPHeaders: {
+        'Accept-Language': 'ru-RU,ru;q=0.9,en-US;q=0.8,en;q=0.7',
+      },
+      ...(credentials['storageState']
         ? { storageState: JSON.parse(credentials['storageState']) as never }
-        : {},
-    );
+        : {}),
+    });
     const page = await context.newPage();
-    const timeout = Number(params['timeoutMs'] || 30_000);
-    const waitUntil =
-      params['waitUntil'] === 'load' || params['waitUntil'] === 'domcontentloaded'
-        ? params['waitUntil']
-        : 'networkidle';
+    const timeout = Number(params['timeoutMs'] || 45_000);
 
-    await page.goto(url, { waitUntil, timeout });
+    await gotoPage(page, url, {
+      waitUntil: parseWaitUntil(params['waitUntil']),
+      timeout,
+    });
 
     const waitFor = String(params['waitFor'] || params['selector'] || '');
 
@@ -173,7 +178,7 @@ export const browserConnector: Connector = {
         waitFor: { type: 'string', description: 'CSS-селектор, ждать появления' },
         waitUntil: {
           type: 'string',
-          description: 'networkidle | load | domcontentloaded',
+          description: 'domcontentloaded | load | commit | networkidle',
         },
         actions: {
           type: 'object',
@@ -187,7 +192,7 @@ export const browserConnector: Connector = {
   ],
   testConnection: async () => {
     try {
-      const browser = await launch();
+      const browser = await launchChromium();
       await browser.close();
 
       return { ok: true, message: 'Chromium запускается' };

@@ -6,11 +6,31 @@ export interface CloudFile {
   mimeType: string;
   provider: CloudProvider;
   webUrl?: string;
+  publicPath?: string;
 }
 
 const XLSX_MIME =
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet';
 const GOOGLE_SHEET_MIME = 'application/vnd.google-apps.spreadsheet';
+const ODS_MIME = 'application/vnd.oasis.opendocument.spreadsheet';
+const XLS_MIME = 'application/vnd.ms-excel';
+
+const YANDEX_PUBLIC_FIELDS = [
+  'name',
+  'path',
+  'type',
+  'mime_type',
+  'media_type',
+  'public_url',
+  'file',
+  '_embedded.items.name',
+  '_embedded.items.path',
+  '_embedded.items.type',
+  '_embedded.items.mime_type',
+  '_embedded.items.media_type',
+  '_embedded.items.public_url',
+  '_embedded.items.file',
+].join(',');
 
 const asRecord = (value: unknown): Record<string, unknown> =>
   value && typeof value === 'object' && !Array.isArray(value)
@@ -73,9 +93,9 @@ const requestBuffer = async (url: string, init: RequestInit, fallback: string) =
 };
 
 const normalizeName = (value: string) =>
-  value.trim().toLowerCase().replace(/\.xlsx?$/i, '');
+  value.trim().toLowerCase().replace(/\.(xlsx?|xlsm|ods)$/i, '');
 
-const isSpreadsheet = (name: string, mimeType = '') => {
+export const isSpreadsheet = (name: string, mimeType = '') => {
   const lower = name.toLowerCase();
   const mime = mimeType.toLowerCase();
 
@@ -83,9 +103,12 @@ const isSpreadsheet = (name: string, mimeType = '') => {
     lower.endsWith('.xlsx') ||
     lower.endsWith('.xls') ||
     lower.endsWith('.xlsm') ||
+    lower.endsWith('.ods') ||
     mime.includes('spreadsheet') ||
     mime === XLSX_MIME ||
-    mime === GOOGLE_SHEET_MIME
+    mime === GOOGLE_SHEET_MIME ||
+    mime === ODS_MIME ||
+    mime === XLS_MIME
   );
 };
 
@@ -119,11 +142,19 @@ const pickBest = (files: CloudFile[], fileName: string): CloudFile => {
     .sort((left, right) => left.score - right.score || left.file.name.localeCompare(right.file.name));
 
   if (ranked.length === 0) {
-    throw new Error(`Файл «${fileName}» не найден на диске`);
+    throw new Error(
+      `Таблица «${fileName}» не найдена на Диске. Укажите имя файла или ссылку на Яндекс Таблицу.`,
+    );
   }
 
   return ranked[0].file;
 };
+
+const fileNames = (files: CloudFile[]) =>
+  files
+    .slice(0, 12)
+    .map((file) => file.name)
+    .join(', ');
 
 const googleHeaders = (token: string): HeadersInit => ({
   Authorization: `Bearer ${token}`,
@@ -135,6 +166,11 @@ const yandexHeaders = (token: string): HeadersInit => ({
 
 export const looksLikeUrl = (value: string) => /^https?:\/\//i.test(value.trim());
 
+export const isYandexDocumentUrl = (value: string) =>
+  /(?:disk\.yandex\.(?:ru|com)|yadi\.sk|yandex\.(?:ru|com)\/(?:disk|docs)|docs\.yandex\.(?:ru|com)|spreadsheet\.yandex\.(?:ru|com)|ya-disk-public:)/i.test(
+    value,
+  );
+
 const fileNameFromUrl = (value: string) => {
   try {
     const path = new URL(value).pathname.split('/').filter(Boolean).pop() || '';
@@ -145,10 +181,26 @@ const fileNameFromUrl = (value: string) => {
   }
 };
 
+const yandexPublicId = (url: string): string => {
+  try {
+    const parsed = new URL(url);
+    const nested =
+      parsed.searchParams.get('url') || parsed.searchParams.get('public_key');
+
+    if (nested) {
+      return nested;
+    }
+  } catch {
+    return url;
+  }
+
+  return url;
+};
+
 export const parseDocumentUrl = (raw: string): CloudFile => {
   const url = raw.trim();
 
-  if (!looksLikeUrl(url)) {
+  if (!looksLikeUrl(url) && !/ya-disk-public:/i.test(url)) {
     throw new Error('Укажите прямую ссылку на документ');
   }
 
@@ -182,13 +234,15 @@ export const parseDocumentUrl = (raw: string): CloudFile => {
     };
   }
 
-  if (/disk\.yandex\.(ru|com)|yadi\.sk|yandex\.(ru|com)\/disk/i.test(url)) {
+  if (isYandexDocumentUrl(url)) {
+    const publicId = yandexPublicId(url);
+
     return {
-      id: url,
+      id: publicId,
       name: fileNameFromUrl(url),
       mimeType: XLSX_MIME,
       provider: 'yandex',
-      webUrl: url,
+      webUrl: /ya-disk-public:/i.test(publicId) ? publicId : url,
     };
   }
 
@@ -216,14 +270,113 @@ const parseProvider = (value: string | undefined): CloudProvider => {
     raw === 'yandex' ||
     raw === 'yadisk' ||
     raw === 'яндекс' ||
+    raw === 'yandex_disk' ||
+    raw === 'tables' ||
+    raw === 'яндекс таблицы' ||
     raw === ''
   ) {
     return 'yandex';
   }
 
   throw new Error(
-    'Укажите хранилище: Google Drive, Яндекс Диск или прямую ссылку',
+    'Укажите хранилище: Яндекс Диск / Яндекс Таблицы, Google Drive или прямую ссылку',
   );
+};
+
+const yandexFileFromItem = (
+  item: Record<string, unknown>,
+  fallback: CloudFile,
+): CloudFile => {
+  const path = typeof item['path'] === 'string' ? item['path'] : '';
+  const publicUrl =
+    (typeof item['public_url'] === 'string' && item['public_url']) ||
+    fallback.webUrl;
+  const mime =
+    String(item['mime_type'] || '') ||
+    String(item['media_type'] || '') ||
+    fallback.mimeType;
+
+  return {
+    id: path || fallback.id,
+    name: String(item['name'] || fallback.name),
+    mimeType: mime,
+    provider: 'yandex',
+    webUrl: publicUrl,
+  };
+};
+
+const publicFolderSheets = (
+  body: Record<string, unknown>,
+  parent: CloudFile,
+): CloudFile[] => {
+  const embedded = asRecord(body['_embedded']);
+  const items = Array.isArray(embedded['items']) ? embedded['items'] : [];
+
+  return items
+    .map((item) => {
+      const file = asRecord(item);
+      const path = String(file['path'] || '');
+      const name = String(file['name'] || '');
+      const mime = String(file['mime_type'] || file['media_type'] || '');
+
+      return {
+        id: path || `${parent.webUrl || parent.id}${path || `/${name}`}`,
+        name,
+        mimeType: mime || XLSX_MIME,
+        provider: 'yandex' as const,
+        webUrl: parent.webUrl || parent.id,
+        publicPath: path || (name ? `/${name}` : undefined),
+      };
+    })
+    .filter((file) => file.name && isSpreadsheet(file.name, file.mimeType));
+};
+
+const resolveYandexPublic = async (
+  parsed: CloudFile,
+  token?: string,
+): Promise<CloudFile> => {
+  const publicKey = parsed.webUrl || parsed.id;
+  const url = new URL('https://cloud-api.yandex.net/v1/disk/public/resources');
+  url.searchParams.set('public_key', publicKey);
+  url.searchParams.set('limit', '100');
+  url.searchParams.set('fields', YANDEX_PUBLIC_FIELDS);
+
+  const body = asRecord(
+    await requestJson(
+      url.toString(),
+      token ? { headers: yandexHeaders(token) } : {},
+      'Не удалось открыть ссылку Яндекс Диска или Яндекс Таблицы',
+    ),
+  );
+  const type = String(body['type'] || '');
+
+  if (type === 'dir') {
+    const sheets = publicFolderSheets(body, parsed);
+
+    if (sheets.length === 1) {
+      return sheets[0];
+    }
+
+    if (sheets.length === 0) {
+      throw new Error(
+        'В публичной папке нет таблиц Excel или Яндекс Таблиц. Укажите ссылку на сам файл.',
+      );
+    }
+
+    throw new Error(
+      `В папке несколько таблиц: ${fileNames(sheets)}. Укажите имя файла.`,
+    );
+  }
+
+  const file = yandexFileFromItem(body, parsed);
+
+  if (!isSpreadsheet(file.name, file.mimeType)) {
+    throw new Error(
+      `«${file.name}» не похож на таблицу. Нужен .xlsx / Яндекс Таблица.`,
+    );
+  }
+
+  return file;
 };
 
 export const resolveDocument = async (
@@ -257,92 +410,25 @@ export const resolveDocument = async (
   }
 
   if (parsed.provider === 'yandex') {
-    const publicKey = encodeURIComponent(parsed.webUrl || parsed.id);
-    const body = asRecord(
-      await requestJson(
-        `https://cloud-api.yandex.net/v1/disk/public/resources?public_key=${publicKey}&fields=name,path,mime_type,type`,
-        token ? { headers: yandexHeaders(token) } : {},
-        'Не удалось открыть ссылку Яндекс Диска',
-      ),
-    );
-    const path = typeof body['path'] === 'string' ? body['path'] : '';
-
-    return {
-      id: path || parsed.id,
-      name: String(body['name'] || parsed.name),
-      mimeType: String(body['mime_type'] || parsed.mimeType),
-      provider: 'yandex',
-      webUrl: parsed.webUrl,
-    };
+    return resolveYandexPublic(parsed, token);
   }
 
   return parsed;
 };
 
-export const testCloud = async (
-  provider: CloudProvider,
-  token: string,
-  fileUrl?: string,
-): Promise<string> => {
-  if (fileUrl || provider === 'url') {
-    if (!fileUrl) {
-      throw new Error('Укажите прямую ссылку на документ');
-    }
-
-    const file = await resolveDocument(fileUrl, token);
-    await downloadCloudFile(token, file);
-
-    return `Документ доступен: ${file.name}`;
-  }
-
-  if (!token) {
-    throw new Error('Укажите OAuth-токен или прямую ссылку на документ');
-  }
-
-  if (provider === 'google') {
-    const body = asRecord(
-      await requestJson(
-        'https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress)',
-        { headers: googleHeaders(token) },
-        'Google Drive недоступен',
-      ),
-    );
-    const user = asRecord(body['user']);
-    const who =
-      (typeof user['emailAddress'] === 'string' && user['emailAddress']) ||
-      (typeof user['displayName'] === 'string' && user['displayName']) ||
-      'ok';
-
-    return `Google Drive: ${who}`;
-  }
-
-  const body = asRecord(
-    await requestJson(
-      'https://cloud-api.yandex.net/v1/disk/',
-      { headers: yandexHeaders(token) },
-      'Яндекс Диск недоступен',
-    ),
-  );
-  const user = asRecord(body['user']);
-  const who =
-    (typeof user['display_name'] === 'string' && user['display_name']) ||
-    (typeof user['login'] === 'string' && user['login']) ||
-    'ok';
-
-  return `Яндекс Диск: ${who}`;
-};
-
 const listGoogle = async (
   token: string,
-  fileName: string,
   folder?: string,
+  fileName = '',
 ): Promise<CloudFile[]> => {
-  const escaped = fileName.replace(/'/g, "\\'");
   const clauses = [
-    `name contains '${escaped}'`,
     'trashed = false',
-    `(mimeType = '${XLSX_MIME}' or mimeType = '${GOOGLE_SHEET_MIME}' or mimeType = 'application/vnd.ms-excel')`,
+    `(mimeType = '${XLSX_MIME}' or mimeType = '${GOOGLE_SHEET_MIME}' or mimeType = '${XLS_MIME}')`,
   ];
+
+  if (fileName.trim()) {
+    clauses.unshift(`name contains '${fileName.replace(/'/g, "\\'")}'`);
+  }
 
   if (folder) {
     clauses.push(`'${folder.replace(/'/g, "\\'")}' in parents`);
@@ -378,25 +464,10 @@ const listGoogle = async (
     .filter((file) => file.id && isSpreadsheet(file.name, file.mimeType));
 };
 
-const listYandex = async (
-  token: string,
+const mapYandexItems = (
+  items: unknown[],
   folder?: string,
-): Promise<CloudFile[]> => {
-  const url = new URL('https://cloud-api.yandex.net/v1/disk/resources/files');
-  url.searchParams.set('limit', '200');
-  url.searchParams.set(
-    'fields',
-    'items.name,items.path,items.mime_type,items.media_type',
-  );
-
-  const body = asRecord(
-    await requestJson(
-      url.toString(),
-      { headers: yandexHeaders(token) },
-      'Не удалось получить список файлов Яндекс Диска',
-    ),
-  );
-  const items = Array.isArray(body['items']) ? body['items'] : [];
+): CloudFile[] => {
   const prefix = folder
     ? folder.startsWith('disk:')
       ? folder.replace(/\/+$/, '')
@@ -431,40 +502,186 @@ const listYandex = async (
     });
 };
 
+const listYandex = async (
+  token: string,
+  folder?: string,
+): Promise<CloudFile[]> => {
+  const headers = { headers: yandexHeaders(token) };
+  const url = new URL('https://cloud-api.yandex.net/v1/disk/resources/files');
+  url.searchParams.set('limit', '200');
+  url.searchParams.set('media_type', 'spreadsheet');
+  url.searchParams.set(
+    'fields',
+    'items.name,items.path,items.mime_type,items.media_type',
+  );
+
+  try {
+    const body = asRecord(
+      await requestJson(
+        url.toString(),
+        headers,
+        'Не удалось получить список таблиц Яндекс Диска',
+      ),
+    );
+    const items = Array.isArray(body['items']) ? body['items'] : [];
+    const files = mapYandexItems(items, folder);
+
+    if (files.length > 0) {
+      return files;
+    }
+  } catch {
+    // fallback below
+  }
+
+  url.searchParams.delete('media_type');
+  const body = asRecord(
+    await requestJson(
+      url.toString(),
+      headers,
+      'Не удалось получить список файлов Яндекс Диска',
+    ),
+  );
+  const items = Array.isArray(body['items']) ? body['items'] : [];
+
+  return mapYandexItems(items, folder);
+};
+
+export const listCloudFiles = async (
+  provider: CloudProvider,
+  token: string,
+  folder?: string,
+): Promise<CloudFile[]> => {
+  if (provider === 'url') {
+    throw new Error('Для прямой ссылки укажите fileUrl, а не список файлов');
+  }
+
+  if (!token) {
+    throw new Error(
+      'Укажите OAuth-токен Диска или прямую ссылку на Яндекс Таблицу',
+    );
+  }
+
+  return provider === 'google'
+    ? listGoogle(token, folder)
+    : listYandex(token, folder);
+};
+
+export const testCloud = async (
+  provider: CloudProvider,
+  token: string,
+  fileUrl?: string,
+): Promise<string> => {
+  if (fileUrl || provider === 'url') {
+    if (!fileUrl) {
+      throw new Error('Укажите прямую ссылку на документ');
+    }
+
+    const file = await resolveDocument(fileUrl, token);
+    await downloadCloudFile(token, file);
+
+    return `Документ доступен: ${file.name}`;
+  }
+
+  if (!token) {
+    throw new Error(
+      'Укажите OAuth-токен или прямую ссылку на Яндекс Таблицу / файл',
+    );
+  }
+
+  if (provider === 'google') {
+    const body = asRecord(
+      await requestJson(
+        'https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress)',
+        { headers: googleHeaders(token) },
+        'Google Drive недоступен',
+      ),
+    );
+    const user = asRecord(body['user']);
+    const who =
+      (typeof user['emailAddress'] === 'string' && user['emailAddress']) ||
+      (typeof user['displayName'] === 'string' && user['displayName']) ||
+      'ok';
+
+    return `Google Drive: ${who}`;
+  }
+
+  const body = asRecord(
+    await requestJson(
+      'https://cloud-api.yandex.net/v1/disk/',
+      { headers: yandexHeaders(token) },
+      'Яндекс Диск недоступен',
+    ),
+  );
+  const user = asRecord(body['user']);
+  const who =
+    (typeof user['display_name'] === 'string' && user['display_name']) ||
+    (typeof user['login'] === 'string' && user['login']) ||
+    'ok';
+  const files = await listYandex(token).catch(() => [] as CloudFile[]);
+
+  return files.length
+    ? `Яндекс Диск: ${who}. Таблиц: ${files.length}`
+    : `Яндекс Диск: ${who}`;
+};
+
 export const findCloudFile = async (
   provider: CloudProvider,
   token: string,
   fileName: string,
   folder?: string,
 ): Promise<CloudFile> => {
-  if (looksLikeUrl(fileName)) {
+  if (looksLikeUrl(fileName) || isYandexDocumentUrl(fileName)) {
     return resolveDocument(fileName, token);
   }
 
   const query = fileName.trim();
-
-  if (!query) {
-    throw new Error('Укажите название Excel-файла или прямую ссылку');
-  }
 
   if (provider === 'url') {
     throw new Error('Для прямой ссылки укажите fileUrl, а не имя файла');
   }
 
   if (!token) {
-    throw new Error('Укажите OAuth-токен или прямую ссылку на документ');
+    throw new Error(
+      'Укажите OAuth-токен или прямую ссылку на Яндекс Таблицу / файл',
+    );
   }
 
   const files =
     provider === 'google'
-      ? await listGoogle(token, query, folder)
+      ? await listGoogle(token, folder, query)
       : await listYandex(token, folder);
+
+  if (!query) {
+    if (files.length === 1) {
+      return files[0];
+    }
+
+    if (files.length === 0) {
+      throw new Error(
+        'На Диске нет таблиц Excel или Яндекс Таблиц. Укажите ссылку или имя файла.',
+      );
+    }
+
+    throw new Error(
+      `На Диске несколько таблиц: ${fileNames(files)}. Укажите имя файла или ссылку.`,
+    );
+  }
 
   return pickBest(files, query);
 };
 
 const isXlsxBuffer = (buffer: Buffer) =>
   buffer.length >= 2 && buffer[0] === 0x50 && buffer[1] === 0x4b;
+
+const assertSpreadsheetBuffer = (buffer: Buffer, where: string) => {
+  if (isXlsxBuffer(buffer)) {
+    return;
+  }
+
+  throw new Error(
+    `${where}. Нужен .xlsx или Яндекс Таблица с доступом по ссылке / OAuth.`,
+  );
+};
 
 const downloadPublicGoogle = async (file: CloudFile) => {
   const url =
@@ -477,20 +694,33 @@ const downloadPublicGoogle = async (file: CloudFile) => {
     'Не удалось скачать документ по ссылке Google',
   );
 
-  if (!isXlsxBuffer(buffer)) {
-    throw new Error(
-      'Google не отдал файл. Откройте доступ по ссылке или подключите Google Drive.',
-    );
-  }
+  assertSpreadsheetBuffer(
+    buffer,
+    'Google не отдал таблицу. Откройте доступ по ссылке или подключите Google Drive',
+  );
 
   return buffer;
 };
 
 const downloadPublicYandex = async (file: CloudFile) => {
-  const publicKey = encodeURIComponent(file.webUrl || file.id);
+  const publicKey = file.webUrl || (looksLikeUrl(file.id) ? file.id : '');
+
+  if (!publicKey) {
+    throw new Error('Нет публичной ссылки Яндекс Диска');
+  }
+
+  const url = new URL(
+    'https://cloud-api.yandex.net/v1/disk/public/resources/download',
+  );
+  url.searchParams.set('public_key', publicKey);
+
+  if (file.publicPath) {
+    url.searchParams.set('path', file.publicPath);
+  }
+
   const body = asRecord(
     await requestJson(
-      `https://cloud-api.yandex.net/v1/disk/public/resources/download?public_key=${publicKey}`,
+      url.toString(),
       {},
       'Не удалось получить ссылку на скачивание',
     ),
@@ -501,7 +731,17 @@ const downloadPublicYandex = async (file: CloudFile) => {
     throw new Error('Яндекс Диск не вернул ссылку на скачивание');
   }
 
-  return requestBuffer(href, {}, 'Не удалось скачать файл по ссылке Яндекс Диска');
+  const buffer = await requestBuffer(
+    href,
+    {},
+    'Не удалось скачать файл по ссылке Яндекс Диска',
+  );
+  assertSpreadsheetBuffer(
+    buffer,
+    'Яндекс не отдал таблицу по ссылке. Проверьте, что это файл .xlsx или Яндекс Таблица',
+  );
+
+  return buffer;
 };
 
 export const downloadCloudFile = async (
@@ -515,11 +755,10 @@ export const downloadCloudFile = async (
       'Не удалось скачать документ по ссылке',
     );
 
-    if (!isXlsxBuffer(buffer)) {
-      throw new Error(
-        'По ссылке нет Excel-файла. Нужна прямая ссылка на .xlsx или доступный документ.',
-      );
-    }
+    assertSpreadsheetBuffer(
+      buffer,
+      'По ссылке нет Excel-файла. Нужна прямая ссылка на .xlsx или Яндекс Таблицу',
+    );
 
     return buffer;
   }
@@ -541,7 +780,12 @@ export const downloadCloudFile = async (
     );
   }
 
-  if (!token || looksLikeUrl(file.id)) {
+  if (
+    !token ||
+    looksLikeUrl(file.id) ||
+    file.publicPath ||
+    !file.id.startsWith('disk:')
+  ) {
     return downloadPublicYandex(file);
   }
 
@@ -558,7 +802,17 @@ export const downloadCloudFile = async (
     throw new Error('Яндекс Диск не вернул ссылку на скачивание');
   }
 
-  return requestBuffer(href, {}, 'Не удалось скачать файл с Яндекс Диска');
+  const buffer = await requestBuffer(
+    href,
+    {},
+    'Не удалось скачать файл с Яндекс Диска',
+  );
+  assertSpreadsheetBuffer(
+    buffer,
+    'Яндекс Диск не отдал таблицу. Нужен .xlsx или Яндекс Таблица',
+  );
+
+  return buffer;
 };
 
 export const uploadCloudFile = async (
@@ -568,7 +822,7 @@ export const uploadCloudFile = async (
 ): Promise<void> => {
   if (file.provider === 'url' || !token) {
     throw new Error(
-      'Запись по прямой ссылке недоступна. Подключите Google Drive или Яндекс Диск.',
+      'Запись по прямой ссылке недоступна. Подключите Яндекс Диск или Google Drive с OAuth-токеном.',
     );
   }
 
@@ -609,9 +863,9 @@ export const uploadCloudFile = async (
     return;
   }
 
-  if (looksLikeUrl(file.id)) {
+  if (looksLikeUrl(file.id) || file.publicPath || !file.id.startsWith('disk:')) {
     throw new Error(
-      'Запись по публичной ссылке Яндекс Диска недоступна. Подключите Диск с OAuth-токеном.',
+      'Запись по публичной ссылке Яндекс Диска недоступна. Подключите Диск с OAuth-токеном и укажите файл на своём Диске.',
     );
   }
 
@@ -653,7 +907,9 @@ export const resolveCloud = (credentials: Record<string, string>) => {
   }
 
   if (provider !== 'url' && !token && !fileUrl) {
-    throw new Error('Укажите OAuth-токен или прямую ссылку на документ');
+    throw new Error(
+      'Укажите OAuth-токен Яндекс Диска или прямую ссылку на таблицу',
+    );
   }
 
   return { provider, token, folder, fileUrl };

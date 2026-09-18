@@ -2,7 +2,9 @@ import {
   BadGatewayException,
   BadRequestException,
   HttpException,
+  Inject,
   Injectable,
+  forwardRef,
 } from '@nestjs/common';
 import {
   createDefaultRegistry,
@@ -20,9 +22,13 @@ import {
   withReadyCta,
   isStopIntent,
   isLaunchIntent,
+  isLiveTrigger,
+  isRunNowIntent,
+  isDoItTask,
   STATUS_STOPPED_MARK,
   LAUNCH_MARK,
   launchedStatusMessage,
+  runMark,
   parseTelegramKindIntent,
   resolveTelegramKind,
   telegramKindLabel,
@@ -30,6 +36,7 @@ import {
 import { scheduleIntentLabel } from '@ai-worker/workflow';
 import { ConnectionsService } from '../connections/connections.service';
 import { ConnectorRegistryService } from '../connectors/connector-registry.service';
+import { RunsService } from '../runs/runs.service';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { AskAgentDto, ChatAgentDto, PlanAgentDto } from './dto';
 
@@ -41,6 +48,8 @@ export class AgentsService {
     private readonly connectors: ConnectorRegistryService,
     private readonly workflows: WorkflowsService,
     private readonly connections: ConnectionsService,
+    @Inject(forwardRef(() => RunsService))
+    private readonly runs: RunsService,
   ) {}
 
   list = () => ({
@@ -53,6 +62,23 @@ export class AgentsService {
       const message = dto.message.trim();
       const prompt = (dto.prompt || message).trim();
       const context = await this.context(dto.workflowId);
+
+      if (
+        dto.workflowId &&
+        isRunNowIntent(message, (context.workflow?.steps.length ?? 0) > 0)
+      ) {
+        return {
+          ...(await this.plan({
+            prompt,
+            message,
+            providerId: dto.providerId,
+            workflowId: dto.workflowId,
+            history: dto.history,
+          })),
+          intent: 'plan' as const,
+        };
+      }
+
       const history = dto.workflowId
         ? await this.workflows.listChatThread(dto.workflowId, 'build')
         : dto.history;
@@ -139,6 +165,14 @@ export class AgentsService {
         };
       }
 
+      if (dto.workflowId) {
+        const current = await this.workflows.get(dto.workflowId);
+
+        if (isRunNowIntent(message, current.steps.length > 0)) {
+          return this.runNow(dto.workflowId, provider.id, message, current);
+        }
+      }
+
       if (dto.workflowId && isLaunchIntent(message)) {
         const started = await this.workflows.startLive(dto.workflowId);
 
@@ -178,6 +212,7 @@ export class AgentsService {
             providerId: dto.providerId,
           }),
           context,
+          [prompt, message].filter(Boolean).join('\n'),
         );
         const current = dto.workflowId
           ? await this.workflows.get(dto.workflowId)
@@ -224,32 +259,47 @@ export class AgentsService {
                   : ' — отвечает в чате с ботом.'
               }`
             : '';
+        const doIt = isDoItTask(message);
+        const alreadyLive = (current?.triggers ?? []).some(isLiveTrigger);
+        const ctaSteps =
+          current?.steps.length && planned.kind !== 'workflow'
+            ? current.steps
+            : planned.kind === 'workflow'
+              ? planned.steps
+              : [];
+        let assistantText =
+          `${toAssistantMessage(planned)}${scheduleNote}${kindNote}`.trim();
+
+        if (doIt) {
+          assistantText = assistantText
+            .replace(/\s*(?:всё подключено\.\s*)?можно запускать\.?/gi, '')
+            .trim();
+        }
+
         const result = {
           ...planned,
           telegramKind,
           message: await this.withReadyCta(
-            `${toAssistantMessage(planned)}${scheduleNote}${kindNote}`.trim(),
-            current?.steps.length && planned.kind !== 'workflow'
-              ? current.steps
-              : planned.kind === 'workflow'
-                ? planned.steps
-                : [],
-            prompt,
-            message,
-            ...(planned.connectors ?? []),
-            ...(planned.steps ?? []).map((step) => step.connectorId),
+            assistantText,
+            ctaSteps,
+            [
+              prompt,
+              message,
+              ...(planned.connectors ?? []),
+              ...(planned.steps ?? []).map((step) => step.connectorId),
+            ],
+            alreadyLive || doIt,
           ),
         };
 
-        if (dto.workflowId) {
+        if (dto.workflowId && result.kind === 'questions') {
           await this.workflows.appendChat(dto.workflowId, 'build', [
             { role: 'user', content: message },
             { role: 'assistant', content: result.message },
           ]);
-        }
-
-        if (dto.workflowId && result.kind === 'questions') {
           await this.workflows.update(dto.workflowId, { prompt });
+
+          return result;
         }
 
         if (dto.workflowId && result.kind === 'workflow') {
@@ -271,7 +321,45 @@ export class AgentsService {
             steps,
           });
 
+          if (doIt && steps.length) {
+            const connections = await this.connections.list();
+            const missing = unresolvedConnectorIds(steps, connections);
+
+            if (!missing.length) {
+              try {
+                const run = await this.runs.start(dto.workflowId, {
+                  source: 'manual',
+                });
+
+                if (!/беру на себя/i.test(result.message)) {
+                  result.message = `Беру на себя.\n\n${result.message}`;
+                }
+
+                result.message = `${result.message.trim()}\n${runMark(run.id)}`;
+              } catch {
+                result.message = await this.withReadyCta(
+                  result.message,
+                  steps,
+                  [message],
+                  alreadyLive,
+                );
+              }
+            }
+          }
+
+          await this.workflows.appendChat(dto.workflowId, 'build', [
+            { role: 'user', content: message },
+            { role: 'assistant', content: result.message },
+          ]);
+
           return { ...result, workflow };
+        }
+
+        if (dto.workflowId) {
+          await this.workflows.appendChat(dto.workflowId, 'build', [
+            { role: 'user', content: message },
+            { role: 'assistant', content: result.message },
+          ]);
         }
 
         return result;
@@ -322,7 +410,8 @@ export class AgentsService {
       const content = await this.withReadyCta(
         reply.message,
         ctaSteps,
-        message,
+        [message],
+        (current?.triggers ?? []).some(isLiveTrigger),
       );
 
       if (dto.workflowId) {
@@ -404,10 +493,67 @@ export class AgentsService {
     };
   };
 
+  private runNow = async (
+    workflowId: string,
+    providerId: string,
+    message: string,
+    current: Awaited<ReturnType<WorkflowsService['get']>>,
+  ) => {
+    const empty = {
+      kind: 'questions' as const,
+      providerId,
+      questions: [] as string[],
+      connectors: [] as string[],
+      steps: [] as never[],
+    };
+
+    if (!current.steps.length) {
+      const content =
+        'Сначала опишите задачу — соберу шаги и сразу запущу, не дожидаясь таймера.';
+
+      await this.workflows.appendChat(workflowId, 'build', [
+        { role: 'user', content: message },
+        { role: 'assistant', content },
+      ]);
+
+      return { ...empty, message: content };
+    }
+
+    const connections = await this.connections.list();
+    const missing = unresolvedConnectorIds(current.steps, connections);
+
+    if (missing.length) {
+      const content = await this.withReadyCta(
+        'Сначала подключите сервисы в чате — потом запущу сразу, не дожидаясь таймера.',
+        current.steps,
+        [message],
+        false,
+      );
+
+      await this.workflows.appendChat(workflowId, 'build', [
+        { role: 'user', content: message },
+        { role: 'assistant', content },
+      ]);
+
+      return { ...empty, message: content };
+    }
+
+    const run = await this.runs.start(workflowId, { source: 'manual' });
+    const content = `Запускаю сейчас, не жду расписание.\n${runMark(run.id)}`;
+
+    await this.workflows.appendChat(workflowId, 'build', [
+      { role: 'user', content: message },
+      { role: 'assistant', content },
+    ]);
+
+    return { ...empty, message: content };
+  };
+
   private withReadyCta = async (
     message: string,
     steps: Array<{ connectorId: string; connectionId?: string | null }>,
-    ...signals: string[]
+    signals: string[] = [],
+    alreadyLive = false,
   ) => {
     const connections = await this.connections.list();
     const fromSteps = requiredConnectorIds(steps);
@@ -433,6 +579,7 @@ export class AgentsService {
       message,
       missing,
       fromSteps.length > 0 && missing.length === 0,
+      alreadyLive,
     );
   };
 }

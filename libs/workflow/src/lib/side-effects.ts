@@ -5,6 +5,8 @@ export const SIDE_EFFECT_ACTIONS = new Set([
   'onec.create_record',
   'onec.update',
   'excel.append_row',
+  'excel.update_row',
+  'excel.apply',
   'memory.set',
 ]);
 

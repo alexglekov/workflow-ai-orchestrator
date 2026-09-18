@@ -17,6 +17,7 @@ export interface Run {
   workflowId: string;
   status: 'pending' | 'running' | 'success' | 'error' | string;
   source?: string;
+  cancelRequested?: boolean;
   input?: unknown;
   startedAt: string | null;
   finishedAt: string | null;

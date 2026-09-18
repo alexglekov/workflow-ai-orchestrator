@@ -1,6 +1,6 @@
 import { humanText } from './human-text';
 
-export { humanText, isJsonDump } from './human-text';
+export { humanText, isJsonDump, runReplyText } from './human-text';
 
 export type TemplateContext = {
   __kind: 'tpl';

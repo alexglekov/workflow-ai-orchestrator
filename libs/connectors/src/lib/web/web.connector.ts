@@ -9,23 +9,14 @@ import {
   mergeContext,
 } from '../interpolate';
 import { webFetch, webSearch, type SearchConfig } from './client';
-import { normalizeQuery } from './query';
+import { searchFreshness, isSearchDump, shapeSearchQuery } from './query';
 import { bestchangeRates } from './bestchange';
+import { pickResultUrl, p2pPageUrl, bestchangePageUrl, exchangePair } from './site';
+import { fetchP2pBook } from './p2p';
 import { resolveLlm } from '../llm/resolve';
 
 const searchConfig = (credentials: Record<string, string>): SearchConfig => ({
-  braveKey: firstNonEmpty(credentials['braveApiKey'], process.env['BRAVE_API_KEY']),
-  googleKey: firstNonEmpty(
-    credentials['googleApiKey'],
-    process.env['GOOGLE_SEARCH_API_KEY'],
-  ),
-  googleCx: firstNonEmpty(credentials['googleCx'], process.env['GOOGLE_SEARCH_CX']),
-  serperKey: firstNonEmpty(credentials['serperApiKey'], process.env['SERPER_API_KEY']),
   tavilyKey: firstNonEmpty(credentials['tavilyApiKey'], process.env['TAVILY_API_KEY']),
-  allowScrape: credentials['allowScrape'] !== 'false',
-  allowBrowser: credentials['allowBrowser'] !== 'false',
-  allowWikipedia: credentials['allowWikipedia'] !== 'false',
-  allowLlmSearch: credentials['allowLlmSearch'] !== 'false',
   llm: resolveLlm(credentials),
 });
 
@@ -34,19 +25,23 @@ const searchQuery = (
   previous: unknown,
 ): string => {
   const ctx = mergeContext(params, previous);
-  const fromPrevious =
+  const explicit = firstNonEmpty(ctx['query'], ctx['q']);
+  const previousRecord =
     previous && typeof previous === 'object'
-      ? firstNonEmpty(
-          (previous as Record<string, unknown>)['query'],
-          (previous as Record<string, unknown>)['inn'],
-          (previous as Record<string, unknown>)['text'],
-          (previous as Record<string, unknown>)['subject'],
-        )
-      : typeof previous === 'string'
-        ? previous
-        : '';
+      ? (previous as Record<string, unknown>)
+      : {};
+  const fromPrevious = firstNonEmpty(
+    previousRecord['query'],
+    previousRecord['q'],
+  );
+  const raw =
+    explicit && !isSearchDump(explicit)
+      ? explicit
+      : fromPrevious && !isSearchDump(fromPrevious)
+        ? fromPrevious
+        : explicit;
 
-  return normalizeQuery(firstNonEmpty(ctx['query'], ctx['q'], fromPrevious));
+  return shapeSearchQuery(raw);
 };
 
 const fetchUrl = (
@@ -61,16 +56,35 @@ const fetchUrl = (
   const results = Array.isArray(record['results'])
     ? (record['results'] as Array<Record<string, unknown>>)
     : [];
-  const first = results[0] || {};
-
-  return firstNonEmpty(
+  const site = firstNonEmpty(ctx['site'], record['site']);
+  const explicit = firstNonEmpty(
     ctx['url'],
     record['url'],
-    first['url'],
     typeof previous === 'string' && previous.startsWith('http')
       ? previous
       : '',
   );
+  const hint = [
+    firstNonEmpty(ctx['query'], record['query']),
+    site,
+    explicit,
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const known = p2pPageUrl(hint) || bestchangePageUrl(hint);
+
+  if (known) {
+    return known;
+  }
+
+  const picked = pickResultUrl(results, site);
+  const first = results[0] || {};
+
+  if (site && picked) {
+    return picked;
+  }
+
+  return firstNonEmpty(explicit, picked, first['url']);
 };
 
 const flag = (value: unknown, fallback: boolean): boolean => {
@@ -85,49 +99,13 @@ export const webConnector: Connector = {
   id: 'web',
   name: 'Web',
   description:
-    'Поиск и чтение публичных страниц: ИНН, BestChange, справки. Структуру из текста достаёт llm.extract',
+    'Поиск через Tavily и чтение публичных страниц. Структуру из текста достаёт llm.extract',
   credentialFields: [
     {
-      key: 'allowLlmSearch',
-      label: 'Искать через Qwen (true/false)',
-      placeholder: 'true — enable_search у Qwen',
-    },
-    {
-      key: 'braveApiKey',
-      label: 'Brave Search API (рекомендуется)',
-      secret: true,
-      placeholder: 'brave.com/search/api — 2000 запросов/мес бесплатно',
-    },
-    {
-      key: 'googleApiKey',
-      label: 'Google Custom Search API key',
-      secret: true,
-      placeholder: 'console.cloud.google.com → Custom Search API',
-    },
-    {
-      key: 'googleCx',
-      label: 'Google CSE id (cx)',
-      placeholder: 'programmablesearchengine.google.com',
-    },
-    {
-      key: 'serperApiKey',
-      label: 'Serper.dev API key (Google-выдача)',
-      secret: true,
-    },
-    {
       key: 'tavilyApiKey',
-      label: 'Tavily API key (поиск с текстом страниц)',
+      label: 'Tavily API key',
       secret: true,
-    },
-    {
-      key: 'allowScrape',
-      label: 'Разрешить бесплатные DuckDuckGo/Mojeek (true/false)',
-      placeholder: 'true',
-    },
-    {
-      key: 'allowBrowser',
-      label: 'Резерв через Chromium, если поисковик блокирует (true/false)',
-      placeholder: 'true',
+      placeholder: 'tavily.com/api-keys — обязателен для web.search',
     },
   ],
   actions: [
@@ -135,7 +113,7 @@ export const webConnector: Connector = {
       id: 'search',
       name: 'Найти в вебе',
       description:
-        'Ищет как в браузере и сразу пишет ответ по выдаче. Результат: answer/text и results[] со ссылками',
+        'Ищет в интернете через Tavily и возвращает answer/text и results[] со ссылками. Текст страниц снимает web.fetch',
       paramsSchema: {
         query: {
           type: 'string',
@@ -152,16 +130,12 @@ export const webConnector: Connector = {
         },
         fetchContent: {
           type: 'boolean',
-          description: 'Подгрузить текст страниц из выдачи (по умолчанию true)',
+          description:
+            'После поиска сразу снять текст страниц через Tavily Extract. Обычно не нужно: это делает web.fetch',
         },
         contentLimit: {
           type: 'number',
-          description: 'Сколько страниц подгружать, по умолчанию 3',
-        },
-        provider: {
-          type: 'string',
-          description:
-            'Форсировать провайдера: llm | brave | google | serper | tavily | duckduckgo-lite | bing | browser | brave-html | duckduckgo | mojeek | wikipedia',
+          description: 'Сколько страниц снимать, если fetchContent=true',
         },
       },
     },
@@ -169,7 +143,7 @@ export const webConnector: Connector = {
       id: 'fetch',
       name: 'Открыть страницу',
       description:
-        'Скачать публичный URL и вернуть текст и таблицы. url или первый результат search',
+        'Снять текст страницы: Tavily Extract → HTML → Web Unlocker (Scraping API, обход блокировок и гео) → Chromium',
       paramsSchema: {
         url: {
           type: 'string',
@@ -183,6 +157,11 @@ export const webConnector: Connector = {
           type: 'boolean',
           description: 'Весь текст вместе с меню и подвалом, по умолчанию false',
         },
+        country: {
+          type: 'string',
+          description:
+            'ISO-код страны для Web Unlocker (резидентский прокси), например us, de, ru. Помогает обойти гео-блок',
+        },
       },
     },
     {
@@ -190,7 +169,11 @@ export const webConnector: Connector = {
       name: 'Курсы BestChange',
       description:
         'BTC/LTC/USDT → RUB из api.bestchange.ru/info.zip, без JS-страницы',
-      paramsSchema: {},
+      paramsSchema: {
+        from: { type: 'string', description: 'Исходная валюта, например USDT' },
+        to: { type: 'string', description: 'Целевая валюта, например BTC' },
+        limit: { type: 'number', description: 'Сколько предложений, по умолчанию 10' },
+      },
     },
   ],
   testConnection: async (credentials) => {
@@ -229,15 +212,20 @@ export const webConnector: Connector = {
           return { ok: false, error: 'Не указан query для web.search' };
         }
 
+        const p2p = /p2p|п2п|оферт/i.test(query);
+        const freshness =
+          p2p && firstNonEmpty(params['freshness']) === 'day'
+            ? 'week'
+            : firstNonEmpty(params['freshness']) ||
+              searchFreshness(`${query} ${firstNonEmpty(params['query'])}`);
         const data = await webSearch({
           query,
-          limit: Number(params['limit'] || 5),
+          limit: Number(params['limit'] || (freshness ? 8 : 5)),
           site: firstNonEmpty(params['site']),
           lang: firstNonEmpty(params['lang']) || 'ru',
           region: firstNonEmpty(params['region']) || 'ru',
-          freshness: firstNonEmpty(params['freshness']) || undefined,
-          provider: firstNonEmpty(params['provider']) || undefined,
-          fetchContent: flag(params['fetchContent'], true),
+          freshness,
+          fetchContent: flag(params['fetchContent'], false),
           contentLimit: Number(params['contentLimit'] || 3),
           config: searchConfig(input.credentials),
         });
@@ -246,6 +234,29 @@ export const webConnector: Connector = {
       }
 
       if (input.action === 'fetch') {
+        const ctx = mergeContext(params, input.previousResult);
+        const record =
+          input.previousResult && typeof input.previousResult === 'object'
+            ? (input.previousResult as Record<string, unknown>)
+            : {};
+        const targetUrl = String(firstNonEmpty(params['url']) || '');
+        const urlSignalsP2p = /\/otc\/|\/fiat\/trade\/|p2p[.-]|p2p-markets/i.test(
+          targetUrl,
+        );
+        const p2pHint = [
+          firstNonEmpty(ctx['query'], record['query']),
+          firstNonEmpty(params['site'], record['site']),
+          targetUrl,
+          urlSignalsP2p ? 'p2p' : '',
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const book = await fetchP2pBook(p2pHint).catch(() => null);
+
+        if (book && book.offers.length) {
+          return { ok: true, data: book };
+        }
+
         const url = fetchUrl(params, input.previousResult);
 
         if (!url) {
@@ -256,15 +267,62 @@ export const webConnector: Connector = {
           url,
           maxChars: Number(params['maxChars'] || 12_000),
           full: flag(params['full'], false),
+          tavilyKey: searchConfig(input.credentials).tavilyKey,
+          country: firstNonEmpty(params['country'], params['geo']) || undefined,
         });
 
         return { ok: true, data };
       }
 
       if (input.action === 'rates') {
-        const data = await bestchangeRates();
+        const ctx = mergeContext(params, input.previousResult);
+        const hint = [
+          firstNonEmpty(params['from'], ctx['from']),
+          firstNonEmpty(params['to'], ctx['to']),
+          firstNonEmpty(params['pair'], params['query'], ctx['query']),
+        ]
+          .filter(Boolean)
+          .join(' ');
+        const pair = exchangePair(`${hint} ${firstNonEmpty(params['from'])}/${firstNonEmpty(params['to'])}`.trim());
+        const from =
+          firstNonEmpty(params['from'], ctx['from']) || pair?.from || '';
+        const to = firstNonEmpty(params['to'], ctx['to']) || pair?.to || '';
+        const limit = Number(params['limit'] || 10);
 
-        return { ok: true, data };
+        try {
+          const data = await bestchangeRates({
+            ...(from ? { from } : {}),
+            ...(to ? { to } : {}),
+            ...(from && to ? { limit } : {}),
+          });
+
+          return { ok: true, data };
+        } catch (error) {
+          const url =
+            bestchangePageUrl(
+              [hint, from && to ? `${from}/${to}` : '', 'bestchange'].join(' '),
+            ) || 'https://www.bestchange.ru/';
+          const page = await webFetch({
+            url,
+            maxChars: 12_000,
+            tavilyKey: searchConfig(input.credentials).tavilyKey,
+            country:
+              firstNonEmpty(params['country'], params['geo']) || undefined,
+          });
+
+          return {
+            ok: true,
+            data: {
+              ...page,
+              source: page.source,
+              text: page.text,
+              warning:
+                error instanceof Error
+                  ? `zip BestChange недоступен (${error.message}), открыл страницу ${url}`
+                  : `zip BestChange недоступен, открыл страницу ${url}`,
+            },
+          };
+        }
       }
 
       return { ok: false, error: `Неизвестное действие: ${input.action}` };

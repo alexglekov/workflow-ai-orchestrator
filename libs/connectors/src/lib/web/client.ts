@@ -1,18 +1,8 @@
-import {
-  extractTables,
-  metaDescription,
-  pageTitle,
-  readableText,
-  stripHtml,
-} from './html';
-import { fetchPublic } from './fetch-public';
-import { buildQuery } from './query';
+import { searchFreshness, shapeSearchQuery } from './query';
 import { rankHits } from './rank';
 import type { SearchHit } from './rank';
 import { composeSearchText, extractiveAnswer } from './answer';
-import { looksRelevant } from './relevance';
 import {
-  SEARCH_PROVIDERS,
   providerById,
   type SearchConfig,
   type SearchOptions,
@@ -20,7 +10,7 @@ import {
 } from './providers';
 import { completeLlm } from '../llm/complete';
 import { resolveLlm } from '../llm/resolve';
-import { humanText } from '../human-text';
+import { readPage, tavilyExtract } from './extract';
 
 export type { SearchHit } from './rank';
 export type { SearchConfig } from './providers';
@@ -43,21 +33,8 @@ export type SearchResponse = {
   text: string;
 };
 
-/** Провайдеры, которые ищут по всему вебу. Остальные — аварийный резерв. */
-const WEB_INDEX = new Set([
-  'llm',
-  'qwen',
-  'brave',
-  'brave-html',
-  'google',
-  'serper',
-  'tavily',
-  'bing',
-  'duckduckgo',
-  'duckduckgo-lite',
-  'mojeek',
-  'browser',
-]);
+/** Поиск идёт только через Tavily. */
+const WEB_INDEX = new Set(['tavily']);
 
 /** Поисковики быстро включают 429, поэтому одинаковые запросы не повторяем. */
 const CACHE_TTL_MS = 5 * 60_000;
@@ -87,57 +64,68 @@ const remember = (key: string, response: SearchResponse): void => {
 };
 
 const NO_PROVIDER_HINT =
-  'Все поисковики отклонили запрос. Попробуйте ещё раз или добавьте ключ в коннекторе Web: Brave / Google CSE / Serper / Tavily. Бесплатный Bing обычно работает без ключа.';
+  'Tavily не ответил. Проверьте TAVILY_API_KEY в .env или в карточке коннектора Web.';
 
-const chooseProviders = (
-  config: SearchConfig,
-  forced?: string,
-): SearchProvider[] => {
-  if (forced) {
-    const provider = providerById(forced);
+const chooseProviders = (config: SearchConfig): SearchProvider[] => {
+  const provider = providerById('tavily');
 
-    if (!provider) {
-      throw new Error(
-        `Неизвестный провайдер поиска: ${forced}. Доступны: ${SEARCH_PROVIDERS.map(
-          (item) => item.id,
-        ).join(', ')}`,
-      );
-    }
-
-    return [provider];
+  if (!provider) {
+    throw new Error('Провайдер Tavily не найден');
   }
 
-  return SEARCH_PROVIDERS.filter((provider) => provider.enabled(config));
+  if (!config.tavilyKey) {
+    throw new Error(
+      'Для поиска в интернете нужен TAVILY_API_KEY. Добавьте ключ в .env или в карточке коннектора Web.',
+    );
+  }
+
+  return [provider];
 };
 
 const enrich = async (
   results: SearchHit[],
   count: number,
   maxChars: number,
+  tavilyKey?: string,
 ): Promise<void> => {
-  const targets = results.slice(0, count).filter((item) => !item.text);
+  const targets = results.slice(0, count).filter((item) => item.url);
+  const urls = targets.map((item) => item.url);
 
-  await Promise.all(
-    targets.map(async (item) => {
-      try {
-        const page = await fetchPublic(item.url, { timeoutMs: 8_000, retries: 0 });
-        const content = readableText(page.body);
+  if (!urls.length) {
+    return;
+  }
 
-        if (content.length > 80) {
-          item.text = content.slice(0, maxChars);
-        }
+  let extracted = new Map<string, string>();
 
-        if (!item.snippet) {
-          item.snippet = metaDescription(page.body).slice(0, 400);
-        }
-      } catch {
-        // страница недоступна — остаёмся со сниппетом выдачи
-      }
-    }),
-  );
+  if (tavilyKey) {
+    try {
+      extracted = await tavilyExtract(urls, tavilyKey);
+    } catch {
+      extracted = new Map();
+    }
+  }
+
+  for (const item of targets) {
+    const content =
+      extracted.get(item.url) ||
+      [...extracted.entries()].find(([url]) => url.includes(item.url) || item.url.includes(url))?.[1] ||
+      '';
+
+    if (content.length > 80) {
+      item.text = content.slice(0, maxChars);
+    }
+  }
 };
 
 const groundedAnswer = (results: SearchHit[]): string => {
+  const featured = results.find(
+    (item) => item.featured && (item.text || '').trim().length > 20,
+  );
+
+  if (featured?.text) {
+    return featured.text.trim();
+  }
+
   const fromLlm = results.find(
     (item) =>
       (item.provider === 'llm' || item.provider === 'qwen') &&
@@ -219,7 +207,13 @@ export const webSearch = async (options: {
   config?: SearchConfig;
 }): Promise<SearchResponse> => {
   const config = options.config ?? {};
-  const query = buildQuery({ query: options.query, site: options.site });
+  const site = (options.site || '')
+    .trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/\/.*$/, '')
+    .replace(/^www\./i, '');
+  const query = shapeSearchQuery(options.query);
+  const freshness = options.freshness || searchFreshness(query);
 
   if (!query) {
     throw new Error('Укажите query для web.search');
@@ -231,16 +225,17 @@ export const webSearch = async (options: {
     limit,
     lang: (options.lang || 'ru').toLowerCase(),
     region: (options.region || 'ru').toLowerCase(),
-    freshness: options.freshness,
-    timeoutMs: 12_000,
+    freshness,
+    timeoutMs: 30_000,
+    site: site || undefined,
   };
   const cacheKey = JSON.stringify([
     query,
+    site,
     limit,
     searchOptions.lang,
     searchOptions.region,
     searchOptions.freshness,
-    options.provider,
   ]);
   const hit = cached(cacheKey);
 
@@ -248,64 +243,109 @@ export const webSearch = async (options: {
     return hit;
   }
 
-  const attempts: ProviderAttempt[] = [];
-  const collected: SearchHit[] = [];
-  let winner = '';
+  const runProviders = async (opts: SearchOptions) => {
+    const attempts: ProviderAttempt[] = [];
+    const collected: SearchHit[] = [];
+    let winner = '';
 
-  const forced = Boolean(options.provider);
+    for (const provider of chooseProviders(config)) {
+      try {
+        const found = await provider.run(opts, config);
 
-  for (const provider of chooseProviders(config, options.provider)) {
-    try {
-      const found = await provider.run(searchOptions, config);
+        attempts.push({
+          provider: provider.id,
+          ok: true,
+          results: found.length,
+        });
+        collected.push(...found);
 
-      if (!forced && !looksRelevant(found, query)) {
-        throw new Error(
-          `${provider.id}: выдача не относится к запросу, источник подменил результаты`,
-        );
+        if (!winner && found.length) {
+          winner = provider.id;
+        }
+      } catch (error) {
+        attempts.push({
+          provider: provider.id,
+          ok: false,
+          results: 0,
+          error: error instanceof Error ? error.message : String(error),
+        });
       }
-
-      attempts.push({ provider: provider.id, ok: true, results: found.length });
-      collected.push(...found);
-
-      if (!winner && found.length) {
-        winner = provider.id;
-      }
-
-      const ranked = rankHits(collected, query, limit);
-
-      if (provider.id === 'llm' && found.length) {
-        break;
-      }
-
-      if (WEB_INDEX.has(provider.id) && ranked.length >= Math.min(limit, 4)) {
-        break;
-      }
-    } catch (error) {
-      attempts.push({
-        provider: provider.id,
-        ok: false,
-        results: 0,
-        error: error instanceof Error ? error.message : String(error),
-      });
     }
+
+    return { attempts, collected, winner };
+  };
+
+  let { attempts, collected, winner } = await runProviders(searchOptions);
+  let results = rankHits(collected, query, limit, 2, site);
+
+  if (!results.length && site) {
+    const withoutSite = await runProviders({
+      ...searchOptions,
+      site: undefined,
+    });
+
+    attempts = [...attempts, ...withoutSite.attempts];
+    collected = withoutSite.collected;
+    winner = withoutSite.winner;
+    results = rankHits(collected, query, limit, 2, site);
   }
 
-  const results = rankHits(collected, query, limit);
+  if (!results.length && searchOptions.freshness === 'day') {
+    const weekly = await runProviders({
+      ...searchOptions,
+      site: undefined,
+      freshness: 'week',
+    });
+
+    attempts = [...attempts, ...weekly.attempts];
+    collected = weekly.collected;
+    winner = weekly.winner;
+    results = rankHits(collected, query, limit, 2, site);
+  }
+
+  if (!results.length && searchOptions.freshness) {
+    const relaxed = await runProviders({
+      ...searchOptions,
+      site: undefined,
+      freshness: undefined,
+    });
+
+    attempts = [...attempts, ...relaxed.attempts];
+    collected = relaxed.collected;
+    winner = relaxed.winner;
+    results = rankHits(collected, query, limit, 2, site);
+  }
 
   if (!results.length) {
     const details = attempts
       .filter((item) => !item.ok)
       .map((item) => `${item.provider}: ${item.error}`)
       .join('; ');
+    const warning = details
+      ? `${NO_PROVIDER_HINT} ${details}`
+      : `по запросу «${query}» ничего не нашлось`;
+    const text = details
+      ? `Не удалось найти в интернете. ${details}`
+      : `Ничего не нашлось по запросу «${query}».`;
 
-    throw new Error(`${NO_PROVIDER_HINT}${details ? ` Детали — ${details}` : ''}`);
+    return {
+      query,
+      provider: attempts.find((item) => item.ok)?.provider || 'tavily',
+      results: [],
+      attempts,
+      degraded: true,
+      warning,
+      answer: '',
+      text,
+    };
   }
 
-  if (options.fetchContent !== false && winner !== 'llm') {
+  if (options.fetchContent) {
     await enrich(
       results,
       Math.min(Math.max(options.contentLimit ?? 3, 0), results.length),
       Math.min(Math.max(options.contentChars ?? 1800, 500), 8_000),
+      config.tavilyKey,
     );
   }
 
@@ -340,6 +380,8 @@ export const webFetch = async (options: {
   url: string;
   maxChars?: number;
   full?: boolean;
+  tavilyKey?: string;
+  country?: string;
 }): Promise<{
   url: string;
   title: string;
@@ -348,35 +390,6 @@ export const webFetch = async (options: {
   text: string;
   tables: string[][][];
   json?: unknown;
-}> => {
-  const maxChars = Math.min(Math.max(options.maxChars || 12_000, 500), 40_000);
-  const response = await fetchPublic(options.url);
-  const type = response.contentType.toLowerCase();
-
-  if (type.includes('application/json') || type.includes('+json')) {
-    const json = JSON.parse(response.body) as unknown;
-
-    return {
-      url: response.url,
-      title: '',
-      description: '',
-      contentType: response.contentType,
-      text: humanText(json).slice(0, maxChars) || JSON.stringify(json).slice(0, maxChars),
-      tables: [],
-      json,
-    };
-  }
-
-  const extracted = options.full
-    ? stripHtml(response.body)
-    : readableText(response.body);
-
-  return {
-    url: response.url,
-    title: pageTitle(response.body),
-    description: metaDescription(response.body),
-    contentType: response.contentType,
-    text: extracted.slice(0, maxChars),
-    tables: extractTables(response.body),
-  };
-};
+  rendered?: boolean;
+  source?: string;
+}> => readPage(options);

@@ -8,6 +8,8 @@ export type SearchHit = {
   provider?: string;
   score?: number;
   text?: string;
+  featured?: boolean;
+  publishedAt?: string;
 };
 
 const TRACKING = /^(utm_|yclid|gclid|fbclid|_openstat|from|ref|referrer)/i;
@@ -74,6 +76,7 @@ export const rankHits = (
   query: string,
   limit: number,
   maxPerHost = 2,
+  preferHost = '',
 ): SearchHit[] => {
   const terms = queryTerms(query);
   const seen = new Map<string, SearchHit>();
@@ -89,12 +92,35 @@ export const rankHits = (
     const wiki =
       /(?:^|\.)wikipedia\.org$/.test(host) || /(?:^|\.)wikiwand\.com$/.test(host);
     const wantsWiki = /\bwiki/i.test(query);
+    const ageDays = hit.publishedAt
+      ? (Date.now() - Date.parse(hit.publishedAt)) / 86_400_000
+      : Number.NaN;
+    const recency =
+      Number.isFinite(ageDays) && ageDays >= 0
+        ? ageDays <= 3
+          ? 2.5
+          : ageDays <= 14
+            ? 1.5
+            : ageDays <= 45
+              ? 0.5
+              : ageDays > 400
+                ? -1.5
+                : 0
+        : 0;
+    const prefer =
+      preferHost &&
+      (host === preferHost ||
+        host.endsWith(`.${preferHost}`) ||
+        (preferHost.split('.')[0] &&
+          host.includes(preferHost.split('.')[0])));
     const score =
       overlap(terms, hit.title) * 3 +
       overlap(terms, hit.snippet) * 1.5 +
       overlap(terms, host.replace(/[.-]/g, ' ')) * 1.5 +
       (hit.snippet.trim() ? 0.4 : 0) +
       Math.max(0, 1 - index / 40) +
+      recency +
+      (prefer ? 4 : 0) +
       (wiki && !wantsWiki ? -2 : 0);
     const existing = seen.get(url);
 

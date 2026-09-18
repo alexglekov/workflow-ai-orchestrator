@@ -5,7 +5,10 @@ import {
   type Connection,
 } from '~/entities/connection';
 import type { ConnectorCatalog } from '~/entities/connector';
-import { TelegramConnectGuide } from '~/features/manage-connection';
+import {
+  ExcelConnectGuide,
+  TelegramConnectGuide,
+} from '~/features/manage-connection';
 import { Button } from '~/shared/ui/Button';
 import { useToast } from '~/shared/model/ui';
 
@@ -116,7 +119,7 @@ export const ChatConnectPanel = ({
     return <p className="muted">Этому сервису не нужны учётные данные.</p>;
   }
 
-  return (
+  const connectForm = (
     <form
       className="chat-connect-form"
       onSubmit={(event) => {
@@ -181,4 +184,10 @@ export const ChatConnectPanel = ({
       </Button>
     </form>
   );
+
+  if (connector.id === 'excel') {
+    return <ExcelConnectGuide>{connectForm}</ExcelConnectGuide>;
+  }
+
+  return connectForm;
 };

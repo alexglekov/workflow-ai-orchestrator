@@ -9,6 +9,9 @@ const HIDDEN = new Set([
   'degraded',
   'cached',
   'fileId',
+  'path',
+  'mimeType',
+  'publicPath',
   'usedFileId',
   'messageId',
   'fromId',
@@ -25,6 +28,8 @@ const HIDDEN = new Set([
   'items',
   'messages',
   'results',
+  'rows',
+  'files',
   'isVoice',
   'is_voice',
   'count',
@@ -35,6 +40,12 @@ const HIDDEN = new Set([
   'lastQty',
   'bidQty',
   'askQty',
+  'applied',
+  'wrote',
+  'notes',
+  'operations',
+  'updated',
+  'offers',
 ]);
 
 const LABELS: Record<string, string> = {
@@ -63,6 +74,9 @@ const LABELS: Record<string, string> = {
   body: 'Текст',
   caption: 'Подпись',
   name: 'Имя',
+  rowIndex: 'Строка',
+  fileName: 'Файл',
+  sheet: 'Лист',
   from: 'От',
   username: 'Кто',
   to: 'Кому',
@@ -232,15 +246,42 @@ export const humanText = (value: unknown, depth = 0): string => {
     return '';
   }
 
-  const listed = record['items'] ?? record['messages'];
+  const listed =
+    record['items'] ??
+    record['messages'] ??
+    record['rows'] ??
+    record['files'];
 
   if (Array.isArray(listed)) {
+    if (Array.isArray(record['rows']) && listed === record['rows']) {
+      const prose = ['answer', 'text']
+        .map((key) => record[key])
+        .find(
+          (item): item is string =>
+            typeof item === 'string' &&
+            item.trim().length > 0 &&
+            !isJsonDump(item),
+        );
+
+      if (prose) {
+        return prose.trim();
+      }
+    }
+
     const lines = listed
       .map((item) => humanText(item, depth + 1))
       .filter(Boolean);
 
     if (lines.length) {
       return lines.join('\n');
+    }
+
+    if (Array.isArray(record['rows'])) {
+      return 'В таблице нет таких строк';
+    }
+
+    if (Array.isArray(record['files'])) {
+      return 'На Диске нет таблиц';
     }
 
     if (record['source'] === 'event' || record['count'] === 0) {
@@ -349,4 +390,108 @@ export const humanText = (value: unknown, depth = 0): string => {
   }
 
   return '';
+};
+
+const NOISE_REPLY = /^(ok|true|false|готово\.?|отправлено\.?)$/i;
+
+export const isThinReply = (value: string): boolean => {
+  const text = value.trim();
+
+  if (!text || NOISE_REPLY.test(text) || text.length < 24) {
+    return true;
+  }
+
+  return !text.includes('\n') && text.length < 160 && /:$/.test(text);
+};
+
+const pickReply = (value: unknown): string => {
+  if (value == null) {
+    return '';
+  }
+
+  const record = asRecord(value);
+  const prose = ['text', 'answer', 'summary', 'body', 'caption']
+    .map((key) => record[key])
+    .find(
+      (item): item is string =>
+        typeof item === 'string' && item.trim().length > 0 && !isJsonDump(item),
+    );
+
+  if (prose) {
+    return prose.trim();
+  }
+
+  const text = humanText(value).trim();
+
+  if (!text || text.length < 12 || NOISE_REPLY.test(text)) {
+    return '';
+  }
+
+  return text;
+};
+
+export const runReplyText = (
+  steps: Array<{
+    connectorId: string;
+    action: string;
+    status?: string;
+    output?: unknown;
+    input?: unknown;
+  }>,
+): string => {
+  const ok = steps.filter(
+    (step) => !step.status || step.status === 'success',
+  );
+
+  const prefer = [
+    (step: (typeof ok)[number]) =>
+      step.connectorId === 'llm' &&
+      (step.action === 'generate' || step.action === 'extract'),
+    (step: (typeof ok)[number]) =>
+      step.connectorId === 'excel' && step.action === 'apply',
+    (step: (typeof ok)[number]) =>
+      step.connectorId === 'transform' &&
+      (step.action === 'template' || step.action === 'join'),
+    (step: (typeof ok)[number]) =>
+      step.action === 'send_message' ||
+      (step.connectorId === 'mail' && step.action === 'send'),
+  ];
+
+  for (const match of prefer) {
+    for (const step of [...ok].reverse()) {
+      if (!match(step)) {
+        continue;
+      }
+
+      const text =
+        pickReply(step.output) ||
+        (step.action === 'send_message' || step.action === 'send'
+          ? pickReply(step.input)
+          : '');
+
+      if (text && !isThinReply(text)) {
+        return text;
+      }
+    }
+  }
+
+  for (const step of [...ok].reverse()) {
+    if (step.connectorId === 'web') {
+      continue;
+    }
+
+    if (step.connectorId === 'browser') {
+      continue;
+    }
+
+    const text = pickReply(step.output);
+
+    if (text && !isThinReply(text)) {
+      return text;
+    }
+  }
+
+  const last = pickReply(ok.at(-1)?.output);
+
+  return last && !isThinReply(last) ? last : '';
 };

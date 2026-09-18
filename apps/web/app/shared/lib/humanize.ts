@@ -1,1 +1,4 @@
-export { humanText as humanizeOutput } from '../../../../../libs/connectors/src/lib/human-text';
+export {
+  humanText as humanizeOutput,
+  runReplyText,
+} from '../../../../../libs/connectors/src/lib/human-text';

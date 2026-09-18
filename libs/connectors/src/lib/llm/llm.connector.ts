@@ -8,9 +8,10 @@ import {
   interpolate,
   humanText,
 } from '../interpolate';
-import { isJsonDump } from '../human-text';
+import { isJsonDump, isThinReply } from '../human-text';
 import { completeLlm } from './complete';
 import { parseJsonObject } from './parse-json';
+import { buildExtractSystem, coerceToSchema } from './extract';
 import { resolveLlm } from './resolve';
 import { bufferFromPrevious, speakText, transcribeAudio } from './audio';
 
@@ -66,10 +67,14 @@ const sourceText = (
 
 const GENERATE_SYSTEM = [
   'Ты пишешь готовый текст, который сразу уйдёт человеку (Telegram, почта, чат, отчёт).',
-  'Верни только этот текст: без преамбулы, без кавычек вокруг всего ответа, без markdown-ограждений.',
+  'Отвечай строго на запрос пользователя из инструкции: только то, что он просил, в запрошенном количестве и формате.',
+  'Отбрасывай нерелевантные результаты и лишние детали из контекста. Не пересказывай всю выдачу — дай сжатый ответ по существу.',
+  'Верни только этот текст: без преамбулы («вот», «отправляю»), без кавычек вокруг всего ответа, без markdown-ограждений и без списка источников.',
   'Запрещено: код, функции, скрипты, JSON, YAML, дампы объектов, инструкции для n8n/Make/Pipedream, комментарии //, блоки ```.',
   'Числа, курсы и даты пиши словами и цифрами, как в сообщении человеку. Не копируй сырой JSON API.',
-  'Если в контексте есть числа — подставь их в текст. Не описывай, как посчитать, а посчитай сам.',
+  'Опирайся только на контекст поиска. Бери самые свежие цифры и даты из источников. Не подставляй устаревшие знания модели. Если даты в источниках разные — назови самую позднюю и от какого числа данные.',
+  'Если просят топ-N или список — выведи пункты с цифрами (цена, объём, кто), а не один заголовок с двоеточием.',
+  'Если в контексте нет запрошенных фактов — честно напиши, чего не хватает. Не выдумывай строки таблицы.',
 ].join(' ');
 
 const unwrapFences = (value: string): string => {
@@ -132,6 +137,14 @@ const generatePlainText = async (
     generated = unwrapFences(
       await ask(
         'Предыдущий ответ был кодом или JSON. Сейчас напиши только готовое сообщение человеку, с уже подставленными числами, без кода и без JSON.',
+      ),
+    );
+  }
+
+  if (isThinReply(generated)) {
+    generated = unwrapFences(
+      await ask(
+        'Предыдущий ответ был слишком коротким или одним заголовком. Напиши полный ответ по контексту: список с цифрами или честно скажи, что этих данных на странице нет.',
       ),
     );
   }
@@ -315,19 +328,12 @@ export const llmConnector: Connector = {
         const extra = firstNonEmpty(params['instruction']);
         const data = await runJson(
           input.credentials,
-          [
-            'Ты извлекаешь структурированные данные из текста.',
-            'Верни только JSON-объект с полями из схемы. Числа — числами, без валютных символов.',
-            'Если поля нет в тексте — null. Не выдумывай.',
-            extra ? `Дополнительно: ${extra}` : '',
-          ]
-            .filter(Boolean)
-            .join(' '),
+          buildExtractSystem(extra),
           `Схема полей:\n${JSON.stringify(schema, null, 2)}\n\nТекст:\n${text.slice(0, 24_000)}`,
           input.signal,
         );
 
-        return { ok: true, data };
+        return { ok: true, data: coerceToSchema(data, schema) };
       }
 
       if (input.action === 'classify') {

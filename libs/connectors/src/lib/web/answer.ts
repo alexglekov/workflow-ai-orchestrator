@@ -8,11 +8,22 @@ export const digestSearchHits = (
   [
     warning ? `Внимание: ${warning}` : '',
     `Источники по запросу: ${query}`,
-    ...results.map((item, index) =>
-      [`${index + 1}. ${item.title}`, item.url, item.snippet]
+    ...results.map((item, index) => {
+      const extra =
+        (item.text || '').trim() &&
+        (item.text || '').trim() !== item.snippet.trim()
+          ? (item.text || '').trim().slice(0, 1600)
+          : '';
+
+      return [
+        `${index + 1}. ${item.title}${item.publishedAt ? ` · ${item.publishedAt.slice(0, 10)}` : ''}`,
+        item.url,
+        item.snippet,
+        extra,
+      ]
         .filter(Boolean)
-        .join('\n'),
-    ),
+        .join('\n');
+    }),
   ]
     .filter(Boolean)
     .join('\n\n');

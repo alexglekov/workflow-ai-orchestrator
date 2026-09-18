@@ -186,6 +186,48 @@ const cellText = (rowHtml: string): string[] =>
     toText(match[1]).replace(/\n+/g, ' ').trim(),
   );
 
+export const isThinPage = (text: string): boolean => {
+  const body = text.replace(/\s+/g, ' ').trim();
+
+  return (
+    body.length < 280 ||
+    /enable javascript|включите javascript|подключ\w*\s+javascript|you need to enable/i.test(
+      body,
+    )
+  );
+};
+
+const SPA_MARKERS =
+  /(<div[^>]+id=["'](?:root|app|__next|__nuxt|q-app)["']|data-reactroot|data-react-helmet|ng-version=|__NEXT_DATA__|window\.__NUXT__|__remixContext|data-server-rendered)/i;
+
+const scriptVolume = (html: string): number =>
+  [...html.matchAll(/<script\b[^>]*>([\s\S]*?)<\/script>/gi)].reduce(
+    (sum, match) => sum + match[1].length,
+    0,
+  );
+
+/**
+ * Страница-оболочка SPA: разметка есть, но текста почти нет, а скриптов много.
+ * Такой HTML нужно дорисовать в Chromium, даже если формально он «не тонкий».
+ */
+export const looksLikeSpaShell = (html: string, text: string): boolean => {
+  if (!SPA_MARKERS.test(html)) {
+    return false;
+  }
+
+  const body = text.replace(/\s+/g, ' ').trim();
+
+  if (body.length >= 1200) {
+    return false;
+  }
+
+  return scriptVolume(html) > Math.max(2000, body.length * 4);
+};
+
+/** Нужно ли открывать страницу в браузере: пусто, JS-заглушка или оболочка SPA. */
+export const needsRender = (html: string, text: string): boolean =>
+  isThinPage(text) || looksLikeSpaShell(html, text);
+
 export const extractTables = (
   html: string,
   maxTables = 4,

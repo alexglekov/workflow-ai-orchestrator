@@ -4,10 +4,11 @@ import {
   ConnectorExecuteInput,
   ConnectorExecuteResult,
 } from '../types';
-import { firstNonEmpty, mergeContext } from '../interpolate';
+import { asRecord, firstNonEmpty, mergeContext } from '../interpolate';
 import {
   downloadCloudFile,
   findCloudFile,
+  listCloudFiles,
   looksLikeUrl,
   resolveCloud,
   resolveDocument,
@@ -16,92 +17,22 @@ import {
   type CloudFile,
   type CloudProvider,
 } from './excel.cloud';
-
-const HEADERS = ['Name', 'Phone', 'Company', 'Amount', 'CreatedAt'];
-
-const cellValue = (value: unknown): unknown => {
-  if (value == null) {
-    return '';
-  }
-
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-
-  if (typeof value === 'object') {
-    const record = value as Record<string, unknown>;
-
-    if (Array.isArray(record['richText'])) {
-      return (record['richText'] as Array<{ text?: string }>)
-        .map((part) => part.text || '')
-        .join('');
-    }
-
-    if (record['text'] != null) {
-      return record['text'];
-    }
-
-    if ('result' in record) {
-      return cellValue(record['result']);
-    }
-  }
-
-  return value;
-};
-
-const uniqueHeader = (name: string, used: Map<string, number>): string => {
-  const count = used.get(name) ?? 0;
-  used.set(name, count + 1);
-
-  return count === 0 ? name : `${name}_${count + 1}`;
-};
-
-const sheetToObjects = (
-  sheet: ExcelJS.Worksheet,
-  limit: number,
-): { headers: string[]; rows: Array<Record<string, unknown>> } => {
-  const headerRow = sheet.getRow(1);
-  const lastCol = Math.max(
-    headerRow.cellCount || 0,
-    sheet.columnCount || 0,
-    sheet.actualColumnCount || 0,
-  );
-
-  if (lastCol === 0) {
-    return { headers: [], rows: [] };
-  }
-
-  const used = new Map<string, number>();
-  const headers: string[] = [];
-
-  for (let col = 1; col <= lastCol; col += 1) {
-    const raw = String(cellValue(headerRow.getCell(col).value) ?? '').trim();
-    headers[col] = uniqueHeader(raw || `col${col}`, used);
-  }
-
-  const named = headers.filter(Boolean);
-  const rows: Array<Record<string, unknown>> = [];
-
-  sheet.eachRow((excelRow, index) => {
-    if (index === 1 || rows.length >= limit) {
-      return;
-    }
-
-    const row: Record<string, unknown> = {};
-
-    for (let col = 1; col <= lastCol; col += 1) {
-      const key = headers[col];
-
-      if (key) {
-        row[key] = cellValue(excelRow.getCell(col).value);
-      }
-    }
-
-    rows.push(row);
-  });
-
-  return { headers: named, rows };
-};
+import {
+  alignToHeaders,
+  appendObjectRow,
+  findMatchingRows,
+  matchHeader,
+  readSheetColumns,
+  rowPayload,
+  sheetToObjects,
+  updateMatchingRows,
+} from './excel.sheet';
+import {
+  applyExcelPlan,
+  contextFromPrevious,
+  planSheetEdits,
+  sheetSnapshot,
+} from './excel.apply';
 
 const loadWorkbook = async (buffer: Buffer, sheetName: string) => {
   const workbook = new ExcelJS.Workbook();
@@ -126,6 +57,7 @@ const toFilePayload = (file: CloudFile, extra: Record<string, unknown> = {}) => 
   mimeType: file.mimeType,
   provider: file.provider,
   webUrl: file.webUrl,
+  publicPath: file.publicPath,
   ...extra,
 });
 
@@ -150,6 +82,7 @@ const fileFromContext = (
     mimeType: String(ctx['mimeType'] || ''),
     provider,
     webUrl: firstNonEmpty(ctx['webUrl']) || undefined,
+    publicPath: firstNonEmpty(ctx['publicPath']) || undefined,
   };
 };
 
@@ -187,32 +120,73 @@ const resolveWorkbookFile = async (
   return findCloudFile(provider, token, fileName, folder);
 };
 
+const rowLimit = (ctx: Record<string, unknown>) =>
+  Math.min(Math.max(Number(ctx['limit'] || 500) || 500, 1), 5000);
+
+const DUMP_KEYS = /^(url|title|query|snippet|html|contentType|answer|results)$/i;
+
+const taskInstruction = (
+  ctx: Record<string, unknown>,
+  input: ConnectorExecuteInput,
+) =>
+  firstNonEmpty(
+    ctx['instruction'],
+    asRecord(input.context?.input)['prompt'],
+    asRecord(input.context?.input)['message'],
+    asRecord(input.context?.input)['text'],
+  );
+
+const needsLlmPlacement = (
+  headers: string[],
+  payload: Record<string, unknown>,
+) => {
+  const keys = Object.keys(payload);
+
+  if (keys.some((key) => DUMP_KEYS.test(key))) {
+    return true;
+  }
+
+  if (headers.length === 0) {
+    return false;
+  }
+
+  return keys.length > 0 && Object.keys(alignToHeaders(headers, payload)).length === 0;
+};
+
+const factsForSheet = (input: ConnectorExecuteInput) =>
+  [
+    contextFromPrevious(input.previousResult),
+    contextFromPrevious(input.context?.input),
+  ]
+    .filter(Boolean)
+    .join('\n\n');
+
 export const excelConnector: Connector = {
   id: 'excel',
-  name: 'Excel',
+  name: 'Excel / Яндекс Таблицы',
   description:
-    'Excel по прямой ссылке или на Google Drive / Яндекс Диске',
+    'Яндекс Таблицы и .xlsx на Яндекс Диске, Google Drive или по ссылке. Ищет, пишет и через excel.apply делает любые правки листа по задаче (LLM + коннектор).',
   credentialFields: [
     {
       key: 'provider',
       label: 'Источник',
       type: 'select',
       options: [
-        { value: 'yandex', label: 'Яндекс Диск' },
+        { value: 'yandex', label: 'Яндекс Диск / Яндекс Таблицы' },
         { value: 'google', label: 'Google Drive' },
         { value: 'url', label: 'Прямая ссылка' },
       ],
     },
     {
       key: 'fileUrl',
-      label: 'Ссылка на документ',
-      placeholder: 'https://disk.yandex.ru/... или Google Sheets',
+      label: 'Ссылка на таблицу',
+      placeholder: 'https://disk.yandex.ru/i/... или docs.yandex.ru',
     },
     {
       key: 'accessToken',
-      label: 'OAuth-токен (если Диск)',
+      label: 'OAuth-токен Диска (для закрытых файлов и записи)',
       secret: true,
-      placeholder: 'Токен Диска',
+      placeholder: 'OAuth-токен Яндекс Диска',
     },
     {
       key: 'folder',
@@ -224,42 +198,105 @@ export const excelConnector: Connector = {
   actions: [
     {
       id: 'find_file',
-      name: 'Найти файл',
-      description: 'Открывает документ по ссылке или ищет .xlsx на Диске по имени',
+      name: 'Найти таблицу',
+      description:
+        'Открывает Яндекс Таблицу / .xlsx по ссылке или ищет на Диске по имени. Без имени — список таблиц.',
       paramsSchema: {
         fileName: {
           type: 'string',
-          description: 'Имя файла, например заявки.xlsx',
+          description: 'Имя файла на Диске, например заявки.xlsx',
         },
         fileUrl: {
           type: 'string',
-          description: 'Прямая ссылка на документ',
+          description: 'Ссылка disk.yandex.ru, docs.yandex.ru или Google Sheets',
         },
-      },
-    },
-    {
-      id: 'append_row',
-      name: 'Добавить строку',
-      description:
-        'Находит файл по имени и дописывает name, phone, company, amount',
-      paramsSchema: {
-        fileName: { type: 'string', description: 'Название файла на Диске' },
-        fileUrl: { type: 'string', description: 'Прямая ссылка на документ' },
-        sheet: { type: 'string', description: 'Переопределить лист' },
       },
     },
     {
       id: 'read_rows',
       name: 'Прочитать строки',
       description:
-        'Находит файл по имени и возвращает строки как объекты {заголовок: значение}',
+        'Возвращает строки как объекты {заголовок листа: значение}',
       paramsSchema: {
         fileName: { type: 'string', description: 'Название файла на Диске' },
-        fileUrl: { type: 'string', description: 'Прямая ссылка на документ' },
+        fileUrl: { type: 'string', description: 'Ссылка на таблицу' },
         sheet: { type: 'string', description: 'Переопределить лист' },
         limit: {
           type: 'number',
           description: 'Максимум строк, по умолчанию 500, максимум 5000',
+        },
+      },
+    },
+    {
+      id: 'find_rows',
+      name: 'Найти записи',
+      description:
+        'Ищет строки по заголовку колонки: field/op/value (eq, contains, gt, lt)',
+      paramsSchema: {
+        fileName: { type: 'string', description: 'Название файла на Диске' },
+        fileUrl: { type: 'string', description: 'Ссылка на таблицу' },
+        sheet: { type: 'string', description: 'Переопределить лист' },
+        field: {
+          type: 'string',
+          description: 'Заголовок колонки, как в таблице',
+        },
+        op: {
+          type: 'string',
+          description: 'eq, contains, gt, gte, lt, lte, neq, empty, not_empty',
+        },
+        value: { type: 'string', description: 'Что искать в колонке' },
+        limit: { type: 'number', description: 'Максимум строк для просмотра' },
+      },
+    },
+    {
+      id: 'append_row',
+      name: 'Добавить строку',
+      description:
+        'Дописывает строку в колонки листа. Поля — как заголовки или row={Заголовок: значение}',
+      paramsSchema: {
+        fileName: { type: 'string', description: 'Название файла на Диске' },
+        fileUrl: { type: 'string', description: 'Ссылка на таблицу' },
+        sheet: { type: 'string', description: 'Переопределить лист' },
+        row: {
+          type: 'object',
+          description: 'Значения по заголовкам листа',
+        },
+      },
+    },
+    {
+      id: 'update_row',
+      name: 'Обновить запись',
+      description:
+        'Находит строки по field/op/value и пишет новые значения из row в те же колонки',
+      paramsSchema: {
+        fileName: { type: 'string', description: 'Название файла на Диске' },
+        fileUrl: { type: 'string', description: 'Ссылка на таблицу' },
+        sheet: { type: 'string', description: 'Переопределить лист' },
+        field: { type: 'string', description: 'Колонка для поиска' },
+        op: { type: 'string', description: 'Оператор сравнения, по умолчанию eq' },
+        value: { type: 'string', description: 'Значение для поиска' },
+        row: {
+          type: 'object',
+          description: 'Какие ячейки обновить',
+        },
+      },
+    },
+    {
+      id: 'apply',
+      name: 'Сделать в таблице',
+      description:
+        'LLM читает лист и выполняет любую задачу: формулы, итоги, дубли, колонки, сортировка, заполнение из поиска, перезапись. instruction — формулировка пользователя.',
+      paramsSchema: {
+        fileName: { type: 'string', description: 'Название файла на Диске' },
+        fileUrl: { type: 'string', description: 'Ссылка на таблицу' },
+        sheet: { type: 'string', description: 'Переопределить лист' },
+        instruction: {
+          type: 'string',
+          description: 'Что сделать с таблицей, словами пользователя',
+        },
+        limit: {
+          type: 'number',
+          description: 'Сколько строк отдать модели, по умолчанию 400',
         },
       },
     },
@@ -299,19 +336,45 @@ export const excelConnector: Connector = {
       const link = firstNonEmpty(ctx['fileUrl'], fileUrl);
 
       if (input.action === 'find_file') {
-        const file = link
-          ? await resolveDocument(link, token)
-          : await findCloudFile(
-              provider,
-              token,
-              firstNonEmpty(ctx['fileName'], input.credentials['fileName']),
-              folder,
-            );
+        if (link) {
+          const file = await resolveDocument(link, token);
+
+          return { ok: true, data: toFilePayload(file) };
+        }
+
+        const fileName = firstNonEmpty(
+          ctx['fileName'],
+          input.credentials['fileName'],
+        );
+
+        if (!fileName) {
+          const files = await listCloudFiles(provider, token, folder);
+
+          if (files.length === 1) {
+            return { ok: true, data: toFilePayload(files[0]) };
+          }
+
+          return {
+            ok: true,
+            data: {
+              files: files.map((file) => toFilePayload(file)),
+              count: files.length,
+            },
+          };
+        }
+
+        const file = await findCloudFile(provider, token, fileName, folder);
 
         return { ok: true, data: toFilePayload(file) };
       }
 
-      if (input.action === 'append_row' || input.action === 'read_rows') {
+      if (
+        input.action === 'append_row' ||
+        input.action === 'read_rows' ||
+        input.action === 'find_rows' ||
+        input.action === 'update_row' ||
+        input.action === 'apply'
+      ) {
         const file = await resolveWorkbookFile(
           ctx,
           input.credentials,
@@ -323,33 +386,134 @@ export const excelConnector: Connector = {
         const buffer = await downloadCloudFile(token, file);
         const { workbook, sheet } = await loadWorkbook(buffer, sheetName);
 
-        if (input.action === 'append_row') {
-          if (sheet.rowCount === 0) {
-            sheet.addRow(HEADERS);
+        if (input.action === 'apply' || input.action === 'append_row' || input.action === 'update_row') {
+          const snapshot = sheetSnapshot(sheet, Math.min(rowLimit(ctx), 400));
+          const payload = rowPayload(ctx);
+          const instruction = taskInstruction(ctx, input);
+          const placeWithLlm =
+            input.action === 'apply' ||
+            Boolean(ctx['instruction']) ||
+            needsLlmPlacement(snapshot.headers, payload);
+
+          if (placeWithLlm) {
+            const task =
+              instruction ||
+              'Запиши данные из фактов в подходящие колонки этой таблицы. Клади значения только в существующие заголовки.';
+
+            const plan = await planSheetEdits(
+              task,
+              snapshot,
+              factsForSheet(input),
+              input.credentials,
+              input.signal,
+            );
+            const applied = applyExcelPlan(sheet, plan.operations);
+
+            if (applied.wrote) {
+              await uploadCloudFile(token, file, await workbookBuffer(workbook));
+            }
+
+            const { headers, rows } = sheetToObjects(sheet, 50);
+
+            return {
+              ok: true,
+              data: toFilePayload(file, {
+                sheet: sheet.name,
+                headers,
+                count: rows.length,
+                applied: applied.applied,
+                wrote: applied.wrote,
+                notes: applied.notes,
+                summary: plan.summary,
+                text: plan.text,
+              }),
+            };
           }
+        }
 
-          const row = [
-            firstNonEmpty(ctx['name'], ctx['from']),
-            firstNonEmpty(ctx['phone']),
-            firstNonEmpty(ctx['company'], ctx['subject']),
-            ctx['amount'] ?? ctx['text'] ?? '',
-            new Date().toISOString(),
-          ];
-
-          sheet.addRow(row);
+        if (input.action === 'append_row') {
+          const headers = readSheetColumns(sheet).headers;
+          const payload = rowPayload(ctx);
+          const aligned =
+            headers.length > 0 ? alignToHeaders(headers, payload) : payload;
+          const written = appendObjectRow(
+            sheet,
+            Object.keys(aligned).length ? aligned : payload,
+            { expand: headers.length === 0 },
+          );
           await uploadCloudFile(token, file, await workbookBuffer(workbook));
 
           return {
             ok: true,
-            data: toFilePayload(file, { sheet: sheet.name, row }),
+            data: toFilePayload(file, {
+              sheet: sheet.name,
+              headers: written.headers,
+              row: written.values,
+              text: 'Записал строку в таблицу',
+            }),
           };
         }
 
-        const limit = Math.min(
-          Math.max(Number(ctx['limit'] || 500) || 500, 1),
-          5000,
-        );
-        const { headers, rows } = sheetToObjects(sheet, limit);
+        if (input.action === 'update_row') {
+          const headers = readSheetColumns(sheet).headers;
+          const field =
+            matchHeader(headers, firstNonEmpty(ctx['field'])) ||
+            firstNonEmpty(ctx['field']);
+          const op = firstNonEmpty(ctx['op']) || 'eq';
+          const explicitRow = rowPayload({
+            row: ctx['row'],
+            values: ctx['values'],
+            fields: ctx['fields'],
+          });
+          const patch = alignToHeaders(
+            headers,
+            Object.keys(explicitRow).length ? explicitRow : rowPayload(ctx),
+          );
+          const updated = updateMatchingRows(
+            sheet,
+            field,
+            op,
+            ctx['value'],
+            Object.keys(patch).length ? patch : explicitRow,
+          );
+          await uploadCloudFile(token, file, await workbookBuffer(workbook));
+
+          return {
+            ok: true,
+            data: toFilePayload(file, {
+              sheet: sheet.name,
+              field,
+              op,
+              value: ctx['value'],
+              updated: updated.updated,
+              rows: updated.rows,
+              items: updated.rows,
+              count: updated.updated,
+            }),
+          };
+        }
+
+        const { headers, rows } = sheetToObjects(sheet, rowLimit(ctx));
+
+        if (input.action === 'find_rows') {
+          const field = firstNonEmpty(ctx['field']);
+          const op = firstNonEmpty(ctx['op']) || (field ? 'contains' : 'eq');
+          const found = findMatchingRows(rows, field, op, ctx['value']);
+
+          return {
+            ok: true,
+            data: toFilePayload(file, {
+              sheet: sheet.name,
+              headers,
+              field,
+              op,
+              value: ctx['value'],
+              rows: found,
+              items: found,
+              count: found.length,
+            }),
+          };
+        }
 
         return {
           ok: true,
@@ -357,6 +521,7 @@ export const excelConnector: Connector = {
             sheet: sheet.name,
             headers,
             rows,
+            items: rows,
             count: rows.length,
           }),
         };

@@ -156,3 +156,120 @@ export const queryTerms = (query: string): string[] => {
 
   return [...new Set(terms)];
 };
+
+const TASK_NOISE = [
+  /(?<![\p{L}])кажд(?:ый|ое|ую)\s+(?:день|утро|час|неделю|минуту)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:ежедневно|ежечасно|по расписанию)(?![\p{L}])/giu,
+  /(?<![\p{L}])каждые\s+\d+\s*\p{L}*/giu,
+  /(?<![\p{L}])в\s+\d{1,2}(?:[:.]\d{2})?(?:\s*(?:утра|вечера|часов|час|ч))?(?![\p{L}\d])/giu,
+  /(?<![\p{L}])(?:пришли|присылай|отправь|отправляй|напиши|сообщи|скинь)[^,.;]*?(?:телеграм\p{L}*|telegram|почт\p{L}*|email|mail|excel|таблиц\p{L}*|чат\p{L}*|бот\p{L}*|сюда)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:в|на)\s+(?:телеграм\p{L}*|telegram|почту|excel|таблицу|этот\s+чат|чат)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:в|во)\s+интернете(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:найди|найти|поищи|проверь|узнай|посмотри|подскажи|нужно|надо|пожалуйста|мне)(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:сводк\p{L}*|отч[её]т\p{L}*)\s+о(?![\p{L}])/giu,
+  /(?<![\p{L}])(?:самых|самые|самый)(?![\p{L}])/giu,
+];
+
+const DANGLING =
+  /^(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же|их|его)(?![\p{L}]))+|(?:[\s,;.]|(?<![\p{L}])(?:и|а|но|же)(?![\p{L}]))+$/giu;
+
+const MONTHS = [
+  'января',
+  'февраля',
+  'марта',
+  'апреля',
+  'мая',
+  'июня',
+  'июля',
+  'августа',
+  'сентября',
+  'октября',
+  'ноября',
+  'декабря',
+];
+
+const stripTaskNoise = (value: string): string =>
+  TASK_NOISE.reduce((text, pattern) => text.replace(pattern, ' '), value)
+    .replace(/\s*[,;]\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(DANGLING, '')
+    .trim();
+
+export const isSearchDump = (value: string): boolean => {
+  const text = value.trim();
+
+  if (!text) {
+    return true;
+  }
+
+  if (text.length > 180) {
+    return true;
+  }
+
+  if (/источники по запросу|```|^\s*[{[]/.test(text)) {
+    return true;
+  }
+
+  return (text.match(/[.!?]\s+\S/g) || []).length >= 2;
+};
+
+export const wantsFreshSearch = (text: string): boolean => {
+  const year = String(new Date().getFullYear());
+
+  return (
+    /курс|цен[аыуе]|котиров|сейчас|сегодня|актуал|свеж|новост|p2p|п2п|оферт|чарт|хит[ыа]|топ\s|рейтинг|рейс|билет|перел[её]т|погод|\blive\b|\bnow\b|usdt|btc|eth/i.test(
+      text,
+    ) || new RegExp(`(?<!\\d)${year}(?!\\d)`).test(text)
+  );
+};
+
+export const searchFreshness = (text: string): 'day' | 'week' | undefined => {
+  if (!wantsFreshSearch(text)) {
+    return undefined;
+  }
+
+  if (/новост|news|сегодня|сейчас/i.test(text)) {
+    return 'day';
+  }
+
+  return 'week';
+};
+
+const withCurrentStamp = (query: string, now: Date): string => {
+  const year = String(now.getFullYear());
+  const month = MONTHS[now.getMonth()];
+  const stamp = `${now.getDate()} ${month} ${year}`;
+  const lower = query.toLowerCase();
+
+  if (lower.includes(month) && query.includes(year)) {
+    return query;
+  }
+
+  if (lower.includes('актуально')) {
+    return `${query} ${stamp}`.replace(/\s+/g, ' ').trim();
+  }
+
+  return `${query} актуально ${stamp}`.replace(/\s+/g, ' ').trim();
+};
+
+export const shapeSearchQuery = (
+  raw: unknown,
+  options?: { now?: Date; stamp?: boolean; maxLength?: number },
+): string => {
+  const cleaned = stripTaskNoise(normalizeQuery(raw, 400));
+  const fallback = normalizeQuery(raw, 400);
+  const phrase = cleaned.length >= 3 ? cleaned : fallback;
+
+  if (!phrase) {
+    return typeof raw === 'string' ? raw.trim().slice(0, options?.maxLength ?? 160) : '';
+  }
+
+  const stamped =
+    options?.stamp === false ||
+    /p2p|п2п|оферт/i.test(phrase) ||
+    !wantsFreshSearch(phrase)
+      ? phrase
+      : withCurrentStamp(phrase, options?.now ?? new Date());
+
+  return cutAtWord(stamped, options?.maxLength ?? 160);
+};

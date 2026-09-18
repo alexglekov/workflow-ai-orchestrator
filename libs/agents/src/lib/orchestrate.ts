@@ -62,6 +62,14 @@ export const inferChatIntent = (
       text,
     )
   ) {
+    if (
+      hasWorkflow &&
+      /сейчас|не\s*взирая|невзирая|не\s*жди|не\s*дожид|отч[её]т/i.test(text) &&
+      !/кажд(?:ый|ую|ое|ые)|ежечас|добавь|убери|поменяй|измени/i.test(text)
+    ) {
+      return 'ask';
+    }
+
     return 'plan';
   }
 

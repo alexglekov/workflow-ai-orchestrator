@@ -109,4 +109,27 @@ describe('rankHits', () => {
 
     assert.equal(results[0].host, 'time.is');
   });
+
+  it('boosts the host the user named', () => {
+    const results = rankHits(
+      [
+        hit({
+          title: 'Обзор',
+          url: 'https://news.com/bestchange',
+          snippet: 'bestchange usdt btc',
+        }),
+        hit({
+          title: 'USDT BTC',
+          url: 'https://www.bestchange.ru/tether-to-bitcoin.html',
+          snippet: 'таблица',
+        }),
+      ],
+      'usdt btc',
+      5,
+      2,
+      'bestchange.ru',
+    );
+
+    assert.equal(results[0].host, 'bestchange.ru');
+  });
 });
